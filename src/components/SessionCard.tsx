@@ -56,6 +56,8 @@ export function SessionCard({ session, onPress, compact }: Props) {
             <Text style={styles.title}>{session.type}</Text>
             {session.subtype ? (
               <Text style={styles.subtype}>· {session.subtype}</Text>
+            ) : session.type === 'Hiking' && session.hikingDifficulty ? (
+              <Text style={styles.subtype}>· {session.hikingDifficulty}</Text>
             ) : null}
           </View>
           <Text style={[styles.status, { color: statusColor }]}>
@@ -67,15 +69,26 @@ export function SessionCard({ session, onPress, compact }: Props) {
             <Text style={styles.meta}>{formatTime(session.startTime)}</Text>
           ) : null}
           <Text style={styles.meta}>{session.durationMinutes} min</Text>
-          {session.type === 'Run' && typeof session.miles === 'number' ? (
+          {(session.type === 'Run' || session.type === 'Hiking') && typeof session.miles === 'number' ? (
             <Text style={styles.meta}>{session.miles.toFixed(1)} mi</Text>
           ) : null}
-          {session.intensity !== undefined && session.intensity > 0 ? (
+          {session.type === 'Hiking' && typeof session.elevationGainFeet === 'number' && session.elevationGainFeet > 0 ? (
+            <Text style={styles.meta}>{Math.round(session.elevationGainFeet)} ft</Text>
+          ) : null}
+          {typeof session.activeCalories === 'number' && session.activeCalories > 0 ? (
+            <Text style={styles.meta}>{Math.round(session.activeCalories)} cal</Text>
+          ) : null}
+          {session.intensity !== undefined && session.intensity > 0
+            && session.type !== 'Run' && session.type !== 'Hiking' ? (
             <Text style={styles.meta}>RPE {session.intensity}</Text>
           ) : null}
           {session.location ? (
             <Text style={styles.metaDim} numberOfLines={1}>
               {session.location}
+            </Text>
+          ) : session.type === 'Hiking' && session.trailName ? (
+            <Text style={styles.metaDim} numberOfLines={1}>
+              {session.trailName}
             </Text>
           ) : null}
         </View>

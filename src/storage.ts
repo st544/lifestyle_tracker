@@ -3,6 +3,7 @@ import {
   Session, SessionInput, Template, Settings, DEFAULT_SETTINGS,
   DailyLog, WeeklyChecklist, DailyInsight,
   StravaTokens, StravaSyncState,
+  FoodEntry, Recipe,
 } from './types';
 import { calculateLoadScore, calculateWeeklyLoad, WeeklyLoad } from './load';
 import { weekRange, isInRange, toDateString } from './dates';
@@ -20,6 +21,9 @@ const KEYS = {
   // since the user last opened a particular screen
   lastSeenStreaks: 'training_last_seen_streaks',
   lastSeenWeeklyPercent: 'training_last_seen_weekly_pct',
+  // Nutrition
+  foodEntries: 'training_food_entries',
+  recipes: 'training_recipes',
 };
 
 function uid(): string {
@@ -49,10 +53,11 @@ export async function saveSessions(sessions: Session[]): Promise<void> {
 
 export async function addSession(input: SessionInput): Promise<Session> {
   const now = new Date().toISOString();
+  const bodyWeightKg = (await getSettings()).bodyWeightKg;
   const session: Session = {
     ...input,
     id: uid(),
-    loadScore: input.loadScore ?? calculateLoadScore(input),
+    loadScore: input.loadScore ?? calculateLoadScore(input, bodyWeightKg),
     createdAt: now,
     updatedAt: now,
   };
@@ -66,6 +71,7 @@ export async function updateSession(
   patch: Partial<Session>
 ): Promise<Session | null> {
   const existing = await getSessions();
+  const bodyWeightKg = (await getSettings()).bodyWeightKg;
   let updated: Session | null = null;
   const next = existing.map((s) => {
     if (s.id !== id) return s;
@@ -76,14 +82,20 @@ export async function updateSession(
       createdAt: s.createdAt,
       updatedAt: new Date().toISOString(),
     };
-    // Recompute load if affecting fields changed
+    // Recompute load if any load-relevant field changed.
     if (
       patch.type !== undefined ||
       patch.subtype !== undefined ||
       patch.durationMinutes !== undefined ||
-      patch.intensity !== undefined
+      patch.intensity !== undefined ||
+      patch.activeCalories !== undefined ||
+      patch.hikingDifficulty !== undefined ||
+      patch.packWeightLbs !== undefined ||
+      patch.elevationGainFeet !== undefined ||
+      patch.miles !== undefined ||
+      patch.loadScore === undefined
     ) {
-      merged.loadScore = calculateLoadScore(merged);
+      merged.loadScore = calculateLoadScore(merged, bodyWeightKg);
     }
     updated = merged;
     return merged;
@@ -116,7 +128,7 @@ export async function calculateProjectedWeeklyLoad(
 ): Promise<WeeklyLoad> {
   const settings = await getSettings();
   const weekSessions = await getSessionsForWeek(reference, settings.weekStartsOn);
-  return calculateWeeklyLoad(weekSessions, settings.defaultWeeklyTargetLoad);
+  return calculateWeeklyLoad(weekSessions, settings.defaultWeeklyTargetLoad, settings.bodyWeightKg);
 }
 
 // --- Templates ---
@@ -230,7 +242,6 @@ export async function upsertDailyLog(patch: Partial<DailyLog> & { date: string }
     all[idx] = updated;
   } else {
     updated = {
-      date: patch.date,
       supplements: {},
       ...patch,
       createdAt: now,
@@ -348,6 +359,75 @@ export async function saveStravaSyncState(s: StravaSyncState): Promise<void> {
   await AsyncStorage.setItem(KEYS.stravaSyncState, JSON.stringify(trimmed));
 }
 
+// --- Nutrition: food entries + recipes ---------------------------------
+
+export async function getFoodEntries(): Promise<FoodEntry[]> {
+  const raw = await AsyncStorage.getItem(KEYS.foodEntries);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as FoodEntry[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+export async function saveFoodEntries(entries: FoodEntry[]): Promise<void> {
+  await AsyncStorage.setItem(KEYS.foodEntries, JSON.stringify(entries));
+}
+
+export async function getFoodEntriesForDate(date: string): Promise<FoodEntry[]> {
+  const all = await getFoodEntries();
+  return all
+    .filter((e) => e.date === date)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export async function addFoodEntry(
+  input: Omit<FoodEntry, 'id' | 'createdAt'>,
+): Promise<FoodEntry> {
+  const entry: FoodEntry = { ...input, id: uid(), createdAt: new Date().toISOString() };
+  const all = await getFoodEntries();
+  await saveFoodEntries([...all, entry]);
+  return entry;
+}
+
+export async function deleteFoodEntry(id: string): Promise<void> {
+  const all = await getFoodEntries();
+  await saveFoodEntries(all.filter((e) => e.id !== id));
+}
+
+/** Sum of calories logged on a given date. */
+export async function getCaloriesForDate(date: string): Promise<number> {
+  const entries = await getFoodEntriesForDate(date);
+  return Math.round(entries.reduce((sum, e) => sum + (e.calories || 0), 0));
+}
+
+export async function getRecipes(): Promise<Recipe[]> {
+  const raw = await AsyncStorage.getItem(KEYS.recipes);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as Recipe[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+export async function saveRecipes(recipes: Recipe[]): Promise<void> {
+  await AsyncStorage.setItem(KEYS.recipes, JSON.stringify(recipes));
+}
+
+export async function addRecipe(
+  input: Omit<Recipe, 'id' | 'createdAt'>,
+): Promise<Recipe> {
+  const recipe: Recipe = { ...input, id: uid(), createdAt: new Date().toISOString() };
+  const all = await getRecipes();
+  await saveRecipes([...all, recipe]);
+  return recipe;
+}
+
+export async function deleteRecipe(id: string): Promise<void> {
+  const all = await getRecipes();
+  await saveRecipes(all.filter((r) => r.id !== id));
+}
+
 /**
  * Build a single JSON payload representing the user's entire training data.
  * Strips Strava tokens, Strava client secret, and the Anthropic API key — the
@@ -356,6 +436,7 @@ export async function saveStravaSyncState(s: StravaSyncState): Promise<void> {
 export async function exportAllAsJson(): Promise<string> {
   const [
     sessions, templates, dailyLogs, weeklyChecklists, dailyInsights, settings, syncState,
+    foodEntries, recipes,
   ] = await Promise.all([
     getSessions(),
     getTemplates(),
@@ -364,10 +445,12 @@ export async function exportAllAsJson(): Promise<string> {
     getDailyInsights(),
     getSettings(),
     getStravaSyncState(),
+    getFoodEntries(),
+    getRecipes(),
   ]);
   // Strip sensitive fields
   const {
-    anthropicApiKey: _a, stravaClientSecret: _b, stravaClientId: _c,
+    anthropicApiKey: _a, stravaClientSecret: _b, stravaClientId: _c, usdaApiKey: _d,
     ...safeSettings
   } = settings;
   const payload = {
@@ -378,6 +461,8 @@ export async function exportAllAsJson(): Promise<string> {
     dailyLogs,
     weeklyChecklists,
     dailyInsights,
+    foodEntries,
+    recipes,
     settings: safeSettings,
     stravaSyncStateMeta: {
       syncedCount: syncState.syncedIds.length,
@@ -409,6 +494,44 @@ export async function migrateSleepQualityIfNeeded(): Promise<void> {
   await saveSettings({ ...settings, sleepQualityMigratedToHundred: true });
 }
 
+/**
+ * Current load-model version. Bump this whenever the per-activity load formulas
+ * in `load.ts` change so historical `loadScore`s get recomputed onto the new
+ * scale. v1 = initial calorie/MET model; v2 = hiking additive-bonus model,
+ * expanded run types, lifting RPE adjustment.
+ */
+export const CURRENT_LOAD_MODEL_VERSION = 2;
+
+/**
+ * Recompute every session's `loadScore` under the current load model whenever
+ * the stored version is behind, so historical trends/ACWR stay on one
+ * consistent scale. Non-destructive (`loadScore` is derived) and idempotent via
+ * the `loadModelVersion` settings flag.
+ */
+export async function migrateLoadScoresIfNeeded(): Promise<void> {
+  const settings = await getSettings();
+  // Treat the old boolean flag as "v1 done" for users who migrated before
+  // versioning existed.
+  const storedVersion = settings.loadModelVersion
+    ?? (settings.loadModelMigratedToCalorie ? 1 : 0);
+  if (storedVersion >= CURRENT_LOAD_MODEL_VERSION) return;
+
+  const sessions = await getSessions();
+  if (sessions.length > 0) {
+    const bodyWeightKg = settings.bodyWeightKg;
+    const recomputed = sessions.map((s) => ({
+      ...s,
+      loadScore: calculateLoadScore(s, bodyWeightKg),
+    }));
+    await saveSessions(recomputed);
+  }
+  await saveSettings({
+    ...settings,
+    loadModelVersion: CURRENT_LOAD_MODEL_VERSION,
+    loadModelMigratedToCalorie: true,
+  });
+}
+
 // Seed default templates on first run
 export async function seedDefaultsIfEmpty(): Promise<void> {
   const tpls = await getTemplates();
@@ -419,23 +542,23 @@ export async function seedDefaultsIfEmpty(): Promise<void> {
       id: uid(), createdAt: now,
       name: 'Princeton BJJ Tuesday',
       type: 'BJJ', startTime: '18:30', durationMinutes: 120, intensity: 7,
-      location: 'Princeton BJJ', subtype: 'Normal Class',
+      location: 'Princeton BJJ', subtype: 'Normal class',
     },
     {
       id: uid(), createdAt: now,
       name: 'Logic BJJ',
       type: 'BJJ', durationMinutes: 90, intensity: 7,
-      location: 'Logic', subtype: 'Normal Class',
+      location: 'Logic', subtype: 'Normal class',
     },
     {
       id: uid(), createdAt: now,
       name: 'Morning Lift',
-      type: 'Lift', durationMinutes: 45, intensity: 6,
+      type: 'Lift', durationMinutes: 45, intensity: 6, subtype: 'Normal lift',
     },
     {
       id: uid(), createdAt: now,
       name: 'Zone 2 Run',
-      type: 'Run', durationMinutes: 30, intensity: 4, subtype: 'Zone 2',
+      type: 'Run', durationMinutes: 30, intensity: 4, subtype: 'Easy / Zone 2',
     },
     {
       id: uid(), createdAt: now,

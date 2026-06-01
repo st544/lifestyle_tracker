@@ -10,6 +10,7 @@
 
 import {
   Session, SessionStatus, SessionType, StravaTokens, Settings, DEFAULT_SETTINGS,
+  HikingDifficulty,
 } from '../types';
 import {
   addSession, getSettings, getStravaTokens, saveStravaTokens,
@@ -145,12 +146,32 @@ function activityToSession(
   const date = toDateString(parseLocalDate(act.start_date_local));
   const startTime = parseLocalTime(act.start_date_local);
 
-  // Strava distance is meters → miles for Run
-  const miles = type === 'Run' && act.distance > 0
+  // Strava distance is meters → miles for Run AND Hiking.
+  const miles = (type === 'Run' || type === 'Hiking') && act.distance > 0
     ? +(act.distance / 1609.344).toFixed(2)
     : undefined;
 
+  // Active calories when Strava provides them (kcal). kilojoules ≈ kcal × 4.184
+  // for work-based activities; fall back to that only if `calories` is absent.
+  const activeCalories =
+    typeof act.calories === 'number' && act.calories > 0
+      ? Math.round(act.calories)
+      : typeof act.kilojoules === 'number' && act.kilojoules > 0
+        ? Math.round(act.kilojoules / 4.184)
+        : undefined;
+
+  // Hiking-specific context.
+  let elevationGainFeet: number | undefined;
+  let hikingDifficulty: HikingDifficulty | undefined;
+  if (type === 'Hiking') {
+    if (typeof act.total_elevation_gain === 'number' && act.total_elevation_gain > 0) {
+      elevationGainFeet = Math.round(act.total_elevation_gain * 3.28084);
+    }
+    hikingDifficulty = inferHikingDifficulty(miles, elevationGainFeet);
+  }
+
   const status: SessionStatus = 'Completed';
+  const bodyWeightKg = settings.bodyWeightKg;
   const session: Omit<Session, 'id' | 'createdAt' | 'updatedAt'> = {
     date,
     startTime,
@@ -160,10 +181,38 @@ function activityToSession(
     intensity,
     status,
     miles,
+    activeCalories,
+    elevationGainFeet,
+    hikingDifficulty,
     notes: act.name?.trim() ? `Strava: ${act.name.trim()}` : 'Imported from Strava',
-    loadScore: calculateLoadScore({ type, subtype, durationMinutes, intensity }),
+    loadScore: calculateLoadScore(
+      {
+        type, subtype, durationMinutes, intensity, activeCalories,
+        hikingDifficulty, miles, elevationGainFeet,
+      },
+      bodyWeightKg,
+    ),
   };
   return session;
+}
+
+/**
+ * Rough hiking difficulty from elevation gain per mile. Used only when
+ * importing from Strava (manual hikes set difficulty in the form).
+ *   < 150 ft/mi → Easy/flat · < 350 → Moderate · < 600 → Hilly ·
+ *   < 900 → Hard/steep · else Very hard/mountain.
+ */
+function inferHikingDifficulty(
+  miles?: number,
+  elevationGainFeet?: number,
+): HikingDifficulty {
+  if (!miles || miles <= 0 || !elevationGainFeet) return 'Moderate';
+  const perMile = elevationGainFeet / miles;
+  if (perMile < 150) return 'Easy / flat';
+  if (perMile < 350) return 'Moderate';
+  if (perMile < 600) return 'Hilly';
+  if (perMile < 900) return 'Hard / steep';
+  return 'Very hard / mountain';
 }
 
 /** Strava sport_type → our SessionType. Returns null if we don't map it. */
@@ -179,10 +228,11 @@ function mapActivityType(act: StravaActivity): SessionType | null {
 
   const t = (act.sport_type || act.type || '').toLowerCase();
   if (['run', 'trailrun', 'virtualrun'].includes(t)) return 'Run';
+  if (['hike'].includes(t)) return 'Hiking';
   if (['weighttraining', 'workout', 'crossfit', 'kettlebell'].includes(t)) return 'Lift';
   if (['yoga', 'pilates'].includes(t)) return 'Mobility / Recovery';
   if (['rockclimbing'].includes(t)) return 'Rock Climb';
-  // Unmapped: Ride, MountainBikeRide, Swim, Walk, Hike, Soccer, etc.
+  // Unmapped: Ride, MountainBikeRide, Swim, Walk, Soccer, etc.
   return null;
 }
 
@@ -193,6 +243,7 @@ function defaultIntensityForType(type: SessionType): number {
     case 'Lift': return 6;
     case 'Run': return 5;
     case 'Rock Climb': return 6;
+    case 'Hiking': return 5;
     case 'Sauna':
     case 'Cold Plunge':
     case 'Sauna + Cold Plunge': return 2;

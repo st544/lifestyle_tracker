@@ -24,7 +24,8 @@ Everyday colors live in `src/theme.ts` under `colors`. They are **calm** — no 
 | `primary` | `#4F8CFF` | Brand accent (Lift color too) |
 
 Activity tints (in `typeColors`):
-- BJJ `#FF6B3D` · Lift `#4F8CFF` · Run `#34D399` · Climb `#A78BFA` · Sauna `#F59E0B` · Plunge `#22D3EE` · Mobility `#2DD4BF` · Rest `#64748B`
+
+- BJJ `#FF6B3D` · Lift `#4F8CFF` · Run `#5DF87A` (light neon green) · Climb `#A78BFA` · **Hiking `#228B22`** (forest green, darker/distinct from Run; icon `footsteps`) · Sauna `#F59E0B` · Plunge `#22D3EE` · Mobility `#2DD4BF` · Rest `#64748B`
 
 ### Zelda palette (`src/theme.ts` → `zelda`)
 
@@ -79,7 +80,7 @@ Should be uncommon enough to remain special.
 
 ### Stagger pacing
 
-Card cascades on screen open use 60–80ms increments. Streak chip ignition uses 70ms. Too tight feels chaotic; too loose feels sluggish.
+Card cascades on screen open use 60–80ms increments. Too tight feels chaotic; too loose feels sluggish. (Calendar streak chips no longer use a scale/move "ignition" — they carry a continuous gradient sheen in the activity color instead.)
 
 ### Performance rules
 

@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, ScrollView, Text } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, ScrollView, Text, Pressable } from 'react-native';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withDelay, withSequence, withSpring, withTiming, Easing,
+  useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing,
 } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Calendar } from 'react-native-calendars';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import * as haptics from '../haptics';
 
 import { colors, spacing, fontSize, typeColors, typeIcons, radius, zelda } from '../theme';
 import { Session, SessionType, Settings, DEFAULT_SETTINGS, DailyLog } from '../types';
@@ -50,17 +52,23 @@ export default function CalendarScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const markedDates = useMemo(() => {
-    const map: Record<string, { dots: { color: string; key: string }[] }> = {};
-    // Session-type dots
+  // Activity-type dots per date (one per distinct type/color; no wellness).
+  const dotsByDate = useMemo(() => {
+    const map: Record<string, { color: string; key: string }[]> = {};
     for (const s of sessions) {
-      if (!map[s.date]) map[s.date] = { dots: [] };
+      if (!map[s.date]) map[s.date] = [];
       const color = typeColors[s.type];
-      if (!map[s.date].dots.find((d) => d.color === color)) {
-        map[s.date].dots.push({ key: s.type, color });
+      if (!map[s.date].find((d) => d.color === color)) {
+        map[s.date].push({ key: s.type, color });
       }
     }
-    // Wellness dot for each day with a daily log (uses wellness-band color)
+    return map;
+  }, [sessions]);
+
+  // Wellness band color per date with a daily log — rendered as a tinted
+  // background behind the date box (not a dot).
+  const wellnessByDate = useMemo(() => {
+    const map: Record<string, string> = {};
     for (const log of dailyLogs) {
       const hasAny =
         log.hrv != null ||
@@ -72,24 +80,48 @@ export default function CalendarScreen() {
         log.date, log, dailyLogs, sessions,
         settings.defaultWeeklyTargetLoad, settings.weekStartsOn,
       );
-      const color = wellnessBand(w.score).color;
-      if (!map[log.date]) map[log.date] = { dots: [] };
-      if (!map[log.date].dots.find((d) => d.key === 'wellness')) {
-        // Insert at front so it reads as the "left-most" indicator
-        map[log.date].dots.unshift({ key: 'wellness', color });
-      }
+      map[log.date] = wellnessBand(w.score).color;
     }
-    const t = todayString();
-    const out: any = { ...map };
-    out[t] = {
-      ...(out[t] ?? { dots: [] }),
-      selected: true,
-      selectedColor: colors.primary + '33',
-    };
-    return out;
-  }, [sessions, dailyLogs, settings.defaultWeeklyTargetLoad, settings.weekStartsOn]);
+    return map;
+  }, [dailyLogs, sessions, settings.defaultWeeklyTargetLoad, settings.weekStartsOn]);
 
   const firstDay = settings.weekStartsOn === 'sunday' ? 0 : 1;
+
+  // Custom day cell — taller block, original-size activity dots, and a faint
+  // wellness-colored background behind the date box.
+  const renderDay = useCallback((dayProps: any) => {
+    const date = dayProps?.date;
+    if (!date) return <View style={dayStyles.cell} />;
+    const ds: string = date.dateString;
+    const dots = dotsByDate[ds] ?? [];
+    const wellnessColor = wellnessByDate[ds];
+    const disabled = dayProps.state === 'disabled';
+    // Only mark "today" within the active month — prevents the duplicate of
+    // today shown as an extra day in the adjacent month from getting a marker.
+    const isToday = ds === todayString() && !disabled;
+    return (
+      <Pressable
+        onPress={() => { haptics.tap(); nav.navigate('DayDetail', { date: ds }); }}
+        style={dayStyles.cell}
+      >
+        <View style={dayStyles.numBox}>
+          {wellnessColor ? (
+            <View style={[dayStyles.wellTint, { backgroundColor: wellnessColor + '33', borderColor: wellnessColor }]} />
+          ) : null}
+          <View style={[dayStyles.numWrap, isToday && dayStyles.todayWrap]}>
+            <Text style={[dayStyles.num, disabled && dayStyles.numDim, isToday && dayStyles.numToday]}>
+              {date.day}
+            </Text>
+          </View>
+        </View>
+        <View style={dayStyles.dotRow}>
+          {dots.slice(0, 6).map((d: { key: string; color: string }, i: number) => (
+            <View key={`${d.key}-${i}`} style={[dayStyles.dot, { backgroundColor: d.color }]} />
+          ))}
+        </View>
+      </Pressable>
+    );
+  }, [dotsByDate, wellnessByDate, nav]);
 
   const streaks: StreakRow[] = useMemo(() => {
     const out: StreakRow[] = [];
@@ -140,9 +172,7 @@ export default function CalendarScreen() {
 
       <Calendar
         key={firstDay}
-        markingType="multi-dot"
-        markedDates={markedDates}
-        onDayPress={(day) => nav.navigate('DayDetail', { date: day.dateString })}
+        dayComponent={renderDay}
         firstDay={firstDay}
         enableSwipeMonths
         theme={{
@@ -169,10 +199,8 @@ export default function CalendarScreen() {
             </View>
           ))}
           <View style={styles.legendItem}>
-            <View style={[styles.dot, {
-              backgroundColor: 'transparent', borderWidth: 1.5, borderColor: colors.textDim,
-            }]} />
-            <Text style={styles.legendText}>Daily log (color = wellness)</Text>
+            <View style={styles.wellnessSwatch} />
+            <Text style={styles.legendText}>Date tint = wellness score</Text>
           </View>
         </View>
       </Section>
@@ -189,56 +217,58 @@ export default function CalendarScreen() {
   );
 }
 
-function StreakChip({ row, index }: { row: StreakRow; index: number }) {
+function StreakChip({ row }: { row: StreakRow; index: number }) {
   const tint = typeColors[row.type];
   const burning = row.weeks > 0;
 
-  // Ignition animation
-  const scale = useSharedValue(0.6);
-  const op = useSharedValue(0);
-  const flameScale = useSharedValue(0.8);
+  // Continuously-shifting gradient sheen in the activity color (active streaks
+  // only). A colored band sweeps left→right on a loop — no scale/move "pop".
+  const [width, setWidth] = useState(0);
+  const sweep = useSharedValue(-1);
 
   useEffect(() => {
-    op.value = withDelay(index * 70, withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) }));
-    scale.value = withDelay(
-      index * 70,
-      withSequence(
-        withSpring(1.08, { damping: 7, stiffness: 200 }),
-        withSpring(1.0, { damping: 11, stiffness: 200 }),
-      )
-    );
     if (burning) {
-      flameScale.value = withDelay(
-        180 + index * 70,
-        withSequence(
-          withSpring(1.25, { damping: 5, stiffness: 220 }),
-          withSpring(1.0, { damping: 9, stiffness: 220 }),
-        )
+      sweep.value = withRepeat(
+        withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        false,
       );
+    } else {
+      sweep.value = -1;
     }
-  }, [burning, index, op, scale, flameScale]);
+  }, [burning, sweep]);
 
-  const chipStyle = useAnimatedStyle(() => ({
-    opacity: op.value,
-    transform: [{ scale: scale.value }],
-  }));
-  const flameStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: flameScale.value }],
+  const sheenStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: sweep.value * (width || 120) }],
   }));
 
   return (
-    <Animated.View style={[styles.streakChip, { borderColor: burning ? tint : colors.border }, chipStyle]}>
-      <Animated.View style={flameStyle}>
-        <Ionicons
-          name={burning ? 'flame' : (typeIcons[row.type] as any)}
-          size={14}
-          color={burning ? tint : colors.textDim}
-        />
-      </Animated.View>
+    <View
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      style={[
+        styles.streakChip,
+        { borderColor: burning ? tint : colors.border, backgroundColor: burning ? tint + '14' : colors.surface },
+      ]}
+    >
+      {burning && width > 0 && (
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, sheenStyle]}>
+          <LinearGradient
+            colors={['transparent', tint + '66', 'transparent']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+      )}
+      <Ionicons
+        name={burning ? 'flame' : (typeIcons[row.type] as any)}
+        size={14}
+        color={burning ? tint : colors.textDim}
+      />
       <Text style={[styles.streakType, { color: colors.text }]}>{row.type}</Text>
       <Text style={[styles.streakWeeks, { color: burning ? tint : colors.textDim }]}>{row.weeks}w</Text>
       <Text style={styles.streakGoal}>· {row.goal}/wk</Text>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -252,6 +282,11 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
   },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  wellnessSwatch: {
+    width: 16, height: 12, borderRadius: 3,
+    backgroundColor: colors.success + '33',
+    borderWidth: 1, borderColor: colors.success + '66',
+  },
   legendText: { color: colors.textDim, fontSize: fontSize.xs, fontWeight: '600' },
 
   streakRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
@@ -260,8 +295,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: 8,
     borderRadius: radius.pill, borderWidth: 1.5,
     backgroundColor: colors.surface,
+    overflow: 'hidden',
   },
   streakType: { fontSize: fontSize.sm, fontWeight: '700' },
   streakWeeks: { fontSize: fontSize.sm, fontWeight: '800' },
   streakGoal: { fontSize: fontSize.xs, color: colors.textDim, fontWeight: '600' },
+});
+
+// Custom calendar day cell — taller block, larger dots.
+const dayStyles = StyleSheet.create({
+  cell: {
+    width: '100%',
+    minHeight: 50,
+    alignItems: 'center',
+    paddingTop: 3,
+    paddingBottom: 3,
+    gap: 4,
+  },
+  // Holds the wellness tint rectangle + the number, centered on top.
+  numBox: {
+    width: 26, height: 24,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  // Small square (no rounded edges) neon outline tinted by the wellness band.
+  wellTint: {
+    position: 'absolute',
+    left: 0, right: 0, top: 0, bottom: 0,
+    borderRadius: 0,
+    borderWidth: 1,
+  },
+  numWrap: {
+    width: 24, height: 22, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  todayWrap: { backgroundColor: colors.primary + '33' },
+  num: { color: colors.text, fontSize: fontSize.md, fontWeight: '600' },
+  numDim: { color: colors.textFaint },
+  numToday: { color: colors.primary, fontWeight: '800' },
+  dotRow: {
+    flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center',
+    gap: 3, maxWidth: 42,
+  },
+  dot: { width: 6, height: 6, borderRadius: 3 },
 });

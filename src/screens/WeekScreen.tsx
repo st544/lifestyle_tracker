@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable, Modal, TextInput } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,8 +8,9 @@ import { format, addDays } from 'date-fns';
 import { colors, spacing, fontSize, radius, typeColors, zelda } from '../theme';
 import { Session, SessionType, Settings, DEFAULT_SETTINGS, WeeklyChecklist, DailyLog } from '../types';
 import {
-  getSessions, getSettings, getWeeklyChecklist, setMealPrepDone, getDailyLogs,
+  getSessions, getSettings, getWeeklyChecklist, setMealPrepDone, getDailyLogs, saveSettings,
 } from '../storage';
+import { toast } from '../toast';
 import { calculateWeeklyLoad, getLoadZone } from '../load';
 import { calculateLoadForm } from '../load-form';
 import { weekRange, isInRange } from '../dates';
@@ -30,6 +31,8 @@ export default function WeekScreen() {
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
   const [checklist, setChecklist] = useState<WeeklyChecklist | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
+  const [editTarget, setEditTarget] = useState(false);
+  const [targetInput, setTargetInput] = useState('');
 
   // The "reference date" that determines which week is displayed.
   // Defaults to today; chevrons shift it ±7 days.
@@ -92,8 +95,24 @@ export default function WeekScreen() {
   const weekSessions = sessions
     .filter((s) => isInRange(s.date, displayedWeek.startStr, displayedWeek.endStr))
     .sort((a, b) => (a.date + (a.startTime ?? '')).localeCompare(b.date + (b.startTime ?? '')));
-  const weekly = calculateWeeklyLoad(weekSessions, settings.defaultWeeklyTargetLoad);
+  const weekly = calculateWeeklyLoad(weekSessions, settings.defaultWeeklyTargetLoad, settings.bodyWeightKg);
   const zone = getLoadZone(weekly.percentProjected);
+
+  const openTargetEditor = () => {
+    haptics.tap();
+    setTargetInput(String(settings.defaultWeeklyTargetLoad));
+    setEditTarget(true);
+  };
+  const saveTarget = async () => {
+    const n = parseInt(targetInput, 10);
+    if (!n || n <= 0) { setEditTarget(false); return; }
+    const next = { ...settings, defaultWeeklyTargetLoad: n };
+    await saveSettings(next);
+    setSettings(next);
+    setEditTarget(false);
+    haptics.success();
+    toast.success(`Weekly target set to ${n}`);
+  };
 
   // 7-day averages for the displayed week
   const weekLogs = useMemo(
@@ -186,7 +205,7 @@ export default function WeekScreen() {
           <Totals label="Completed" value={weekly.completedLoad} />
           <Totals label="Planned" value={weekly.plannedLoad} />
           <Totals label="Total" value={weekly.totalProjected} />
-          <Totals label="Target" value={settings.defaultWeeklyTargetLoad} />
+          <Totals label="Target" value={settings.defaultWeeklyTargetLoad} onPress={openTargetEditor} />
         </View>
       </Card>
 
@@ -356,6 +375,34 @@ export default function WeekScreen() {
         </Card>
       )}
       <View style={{ height: spacing.xxl }} />
+
+      {/* Edit weekly target — applies to every week */}
+      <Modal visible={editTarget} transparent animationType="fade" onRequestClose={() => setEditTarget(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setEditTarget(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Weekly load target</Text>
+            <Text style={styles.modalSub}>Applies to every week. The load bar fills against this.</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={targetInput}
+              onChangeText={setTargetInput}
+              keyboardType="number-pad"
+              placeholder="4000"
+              placeholderTextColor={colors.textFaint}
+              autoFocus
+              selectTextOnFocus
+            />
+            <View style={styles.modalBtns}>
+              <Pressable style={[styles.modalBtn, styles.modalCancel]} onPress={() => setEditTarget(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.modalBtn, styles.modalSave]} onPress={saveTarget}>
+                <Text style={styles.modalSaveText}>Save</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -386,13 +433,20 @@ function FormStat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function Totals({ label, value }: { label: string; value: number }) {
-  return (
-    <View style={styles.total}>
+function Totals({ label, value, onPress }: { label: string; value: number; onPress?: () => void }) {
+  const content = (
+    <>
       <Text style={styles.totalVal}>{value}</Text>
-      <Text style={styles.totalLbl}>{label}</Text>
-    </View>
+      <View style={styles.totalLblRow}>
+        <Text style={styles.totalLbl}>{label}</Text>
+        {onPress && <Ionicons name="pencil" size={10} color={colors.textDim} />}
+      </View>
+    </>
   );
+  if (onPress) {
+    return <Pressable style={styles.total} onPress={onPress}>{content}</Pressable>;
+  }
+  return <View style={styles.total}>{content}</View>;
 }
 
 function MinutesStat({
@@ -474,7 +528,32 @@ const styles = StyleSheet.create({
   totalsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md },
   total: { alignItems: 'center' },
   totalVal: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
-  totalLbl: { color: colors.textDim, fontSize: fontSize.xs, marginTop: 2, letterSpacing: 0.5 },
+  totalLblRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  totalLbl: { color: colors.textDim, fontSize: fontSize.xs, letterSpacing: 0.5 },
+
+  modalBackdrop: {
+    flex: 1, backgroundColor: '#000000AA',
+    alignItems: 'center', justifyContent: 'center', padding: spacing.xl,
+  },
+  modalCard: {
+    width: '100%', backgroundColor: colors.surface,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
+    padding: spacing.lg, gap: spacing.sm,
+  },
+  modalTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  modalSub: { color: colors.textDim, fontSize: fontSize.sm },
+  modalInput: {
+    backgroundColor: colors.surfaceAlt, color: colors.text,
+    paddingHorizontal: spacing.md, paddingVertical: 12,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    fontSize: fontSize.xl, fontWeight: '800', marginTop: spacing.xs,
+  },
+  modalBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  modalBtn: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: radius.pill },
+  modalCancel: { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  modalCancelText: { color: colors.text, fontWeight: '700' },
+  modalSave: { backgroundColor: colors.primary },
+  modalSaveText: { color: '#0B0F14', fontWeight: '800' },
 
   countsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   count: {

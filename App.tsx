@@ -22,9 +22,14 @@ import StravaSetupScreen from './src/screens/StravaSetupScreen';
 import CsvImportScreen from './src/screens/CsvImportScreen';
 import WellnessScreen from './src/screens/WellnessScreen';
 import ReadinessScreen from './src/screens/ReadinessScreen';
+import NutritionScreen from './src/screens/NutritionScreen';
+import RecipeBuilderScreen from './src/screens/RecipeBuilderScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 
 import { colors } from './src/theme';
 import { AnimatedTabIcon } from './src/components/AnimatedTabIcon';
+import { ElevatedAddTab } from './src/components/ElevatedAddTab';
+import { ToastHost } from './src/components/ToastHost';
 import { RootStackParamList, TabsParamList } from './src/navigation';
 
 const Tabs = createBottomTabNavigator<TabsParamList>();
@@ -67,6 +72,8 @@ function TabsNavigator() {
           height: 56 + bottomPad,
           paddingBottom: bottomPad,
           paddingTop: 6,
+          // Allow the elevated Add FAB to render outside the bar
+          overflow: 'visible',
         },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textDim,
@@ -83,7 +90,15 @@ function TabsNavigator() {
     >
       <Tabs.Screen name="Today" component={TodayScreen} options={{ title: 'Today' }} />
       <Tabs.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calendar' }} />
-      <Tabs.Screen name="AddTab" component={AddTabScreen} options={{ title: 'Add' }} />
+      <Tabs.Screen
+        name="AddTab"
+        component={AddTabScreen}
+        options={{
+          title: 'Add',
+          tabBarLabel: () => null,
+          tabBarButton: (props) => <ElevatedAddTab {...props} />,
+        }}
+      />
       <Tabs.Screen name="Week" component={WeekScreen} options={{ title: 'This Week' }} />
       <Tabs.Screen name="Trends" component={TrendsScreen} options={{ title: 'Trends' }} />
     </Tabs.Navigator>
@@ -113,13 +128,17 @@ export default function App() {
             />
             <Root.Screen name="DayDetail" component={DayDetailScreen} options={{ title: 'Day' }} />
             <Root.Screen name="Backfill" component={BackfillScreen} options={{ title: 'Backfill Week' }} />
-            <Root.Screen name="Goals" component={GoalsScreen} options={{ title: 'Goals & Settings', presentation: 'modal' }} />
+            <Root.Screen name="Goals" component={GoalsScreen} options={{ title: 'Goals', presentation: 'modal' }} />
+            <Root.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', presentation: 'modal' }} />
             <Root.Screen name="DailyLog" component={DailyLogScreen} options={{ title: 'Daily Log', presentation: 'modal' }} />
             <Root.Screen name="StravaSetup" component={StravaSetupScreen} options={{ title: 'Strava', presentation: 'modal' }} />
             <Root.Screen name="CsvImport" component={CsvImportScreen} options={{ title: 'Import CSV', presentation: 'modal' }} />
             <Root.Screen name="Wellness" component={WellnessScreen} options={{ title: 'Wellness', presentation: 'modal' }} />
             <Root.Screen name="Readiness" component={ReadinessScreen} options={{ title: 'Training Readiness', presentation: 'modal' }} />
+            <Root.Screen name="Nutrition" component={NutritionScreen} options={{ title: 'Nutrition', presentation: 'modal' }} />
+            <Root.Screen name="RecipeBuilder" component={RecipeBuilderScreen} options={{ title: 'New Recipe', presentation: 'modal' }} />
           </Root.Navigator>
+          <ToastHost />
         </NavigationContainer>
       </SafeAreaProvider>
     </GestureHandlerRootView>

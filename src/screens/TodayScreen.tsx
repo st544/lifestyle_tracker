@@ -1,22 +1,31 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, RefreshControl, Pressable,
+  View, Text, StyleSheet, RefreshControl, Pressable, LayoutChangeEvent,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
-import { LinearGradient } from 'expo-linear-gradient';
+import Animated, {
+  useSharedValue, useAnimatedStyle, useAnimatedScrollHandler,
+  withTiming, interpolate, Extrapolation,
+} from 'react-native-reanimated';
 
 import { colors, spacing, fontSize, radius, zelda } from '../theme';
-import { Session, SessionType, Settings, DEFAULT_SETTINGS, DailyLog, DailyInsight } from '../types';
+import { Session, SessionType, Settings, DEFAULT_SETTINGS, DailyLog, DailyInsight, FoodEntry } from '../types';
+import { ALL_TYPES } from '../defaults';
+import { calculateStreak } from '../streaks';
+import { WeekDaysRing } from '../components/WeekDaysRing';
+import { HolyMoonlightSword } from '../components/HolyMoonlightSword';
 import {
   getSessions, getSettings, seedDefaultsIfEmpty, updateSession,
   getLastSeenWeeklyPercent, saveLastSeenWeeklyPercent,
   getDailyLogs, upsertDailyLog, getDailyInsight,
-  migrateSleepQualityIfNeeded,
+  migrateSleepQualityIfNeeded, migrateLoadScoresIfNeeded,
+  getFoodEntriesForDate,
 } from '../storage';
-import { calculateWeeklyLoad, getLoadZone } from '../load';
+import { calculateWeeklyLoad } from '../load';
+import { readinessBand } from '../readiness';
 import { weekRange, isInRange, todayString, parseDateString } from '../dates';
 import { generateSmartMessage } from '../messages';
 import { calculateWellness } from '../wellness';
@@ -26,18 +35,19 @@ import { syncStravaActivities } from '../api/strava-sync';
 import { addDays } from 'date-fns';
 import { toDateString } from '../dates';
 import { QuickAddBar } from '../components/QuickAddBar';
-import { LoadBar } from '../components/LoadBar';
+// (LoadBar now lives inside TrainingReadinessCard)
 import { SessionCard } from '../components/SessionCard';
 import { Section, Card } from '../components/Section';
-import { AnimatedNumber } from '../components/AnimatedNumber';
+// (AnimatedNumber moved into TrainingReadinessCard for the big projected % display)
 import { PulseNumber } from '../components/PulseNumber';
 import { FadeInView } from '../components/FadeInView';
-import { TypewriterText } from '../components/TypewriterText';
+// (TypewriterText moved into TrainingReadinessCard for the smart message)
 import { TriforceBurst } from '../components/TriforceBurst';
 import { DailyLogRow } from '../components/DailyLogRow';
 import { DailyInsightCard } from '../components/DailyInsightCard';
 import { TrainingReadinessCard } from '../components/TrainingReadinessCard';
 import * as haptics from '../haptics';
+import { toast } from '../toast';
 import { RootStackParamList } from '../navigation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -47,6 +57,7 @@ export default function TodayScreen() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
+  const [foodEntries, setFoodEntries] = useState<FoodEntry[]>([]);
   const [insight, setInsight] = useState<DailyInsight | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -55,25 +66,49 @@ export default function TodayScreen() {
   const [smartMessage, setSmartMessage] = useState('');
   const firstLoadRef = useRef(true);
 
+  // Sticky-banner scroll state. We capture the bottom Y of the readiness card
+  // via onLayout, then animate a thin banner in once scrollY passes it.
+  const scrollY = useSharedValue(0);
+  const cardBottomY = useSharedValue(360);  // sensible default before measure
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => { scrollY.value = e.contentOffset.y; },
+  });
+  const onCardLayout = (e: LayoutChangeEvent) => {
+    // The card sits below the hero (date row). Use its y + height.
+    cardBottomY.value = e.nativeEvent.layout.y + e.nativeEvent.layout.height - 20;
+  };
+  const bannerStyle = useAnimatedStyle(() => {
+    const past = scrollY.value > cardBottomY.value;
+    return {
+      opacity: withTiming(past ? 1 : 0, { duration: 180 }),
+      transform: [{ translateY: withTiming(past ? 0 : -60, { duration: 180 }) }],
+    };
+  });
+
   const load = useCallback(async (isRefresh = false) => {
     await seedDefaultsIfEmpty();
     await migrateSleepQualityIfNeeded();
+    await migrateLoadScoresIfNeeded();
 
     // Best-effort Strava sync. Silently no-ops if not configured; logs but
     // doesn't throw on transient API errors so the screen always renders.
     try {
-      await syncStravaActivities();
+      const result = await syncStravaActivities();
+      if (result.imported > 0) {
+        toast.success(`Strava: ${result.imported} ${result.imported === 1 ? 'activity' : 'activities'} imported`);
+      }
     } catch (err) {
       // Swallow — surfaced via the Strava setup screen on next visit
       console.warn('Strava sync failed:', err);
     }
 
-    const [s, st, logs] = await Promise.all([
-      getSessions(), getSettings(), getDailyLogs(),
+    const [s, st, logs, food] = await Promise.all([
+      getSessions(), getSettings(), getDailyLogs(), getFoodEntriesForDate(todayString()),
     ]);
     setSessions(s);
     setSettings(st);
     setDailyLogs(logs);
+    setFoodEntries(food);
 
     const { startStr, endStr } = weekRange(new Date(), st.weekStartsOn);
     const weekSessions = s.filter((x) => isInRange(x.date, startStr, endStr));
@@ -111,10 +146,33 @@ export default function TodayScreen() {
   const planned = todaySessions.filter((s) => s.status === 'Planned');
   const done = todaySessions.filter((s) => s.status === 'Completed' || s.status === 'Partial');
 
+  // Nutrition summary (today)
+  const calConsumed = Math.round(foodEntries.reduce((a, e) => a + (e.calories || 0), 0));
+  const calBurned = Math.round(done.reduce((a, s) => a + (s.activeCalories || 0), 0));
+  const proteinSum = Math.round(foodEntries.reduce((a, e) => a + (e.proteinG || 0), 0));
+  const carbsSum = Math.round(foodEntries.reduce((a, e) => a + (e.carbsG || 0), 0));
+  const fatSum = Math.round(foodEntries.reduce((a, e) => a + (e.fatG || 0), 0));
+  const calGoal = settings.dailyCalorieGoal;
+  const calPct = calGoal && calGoal > 0 ? Math.min(100, (calConsumed / calGoal) * 100) : 0;
+
   const { startStr, endStr } = weekRange(new Date(), settings.weekStartsOn);
   const weekSessions = sessions.filter((s) => isInRange(s.date, startStr, endStr));
-  const weekly = calculateWeeklyLoad(weekSessions, settings.defaultWeeklyTargetLoad);
-  const zone = getLoadZone(weekly.percentProjected);
+  const weekly = calculateWeeklyLoad(weekSessions, settings.defaultWeeklyTargetLoad, settings.bodyWeightKg);
+
+  // Longest active streak across all goal types (for the flame chip).
+  const bestStreak = ALL_TYPES.reduce((best, t) => {
+    const goal = settings.goals[t];
+    if (!goal) return best;
+    const { weeks } = calculateStreak(sessions, t, goal, settings.weekStartsOn);
+    return Math.max(best, weeks);
+  }, 0);
+
+  // Distinct days trained this week (any completed/partial non-Rest session).
+  const daysTrained = new Set(
+    weekSessions
+      .filter((s) => (s.status === 'Completed' || s.status === 'Partial') && s.type !== 'Rest')
+      .map((s) => s.date),
+  ).size;
   const wellness = calculateWellness(
     today, todayLog, dailyLogs, sessions,
     settings.defaultWeeklyTargetLoad, settings.weekStartsOn,
@@ -124,14 +182,6 @@ export default function TodayScreen() {
     settings.defaultWeeklyTargetLoad, settings.weekStartsOn,
   );
 
-  // Gradient colors shift with the zone
-  const gradientColors: [string, string] =
-    zone.key === 'light' ? [zelda.skyTeal + '33', colors.surface]
-    : zone.key === 'moderate' ? [zelda.rupeeGreen + '33', colors.surface]
-    : zone.key === 'productive' ? [zelda.rupeeBlue + '33', colors.surface]
-    : zone.key === 'high' ? [zelda.triforceGold + '33', colors.surface]
-    : [zelda.rupeeRed + '44', colors.surface];
-
   const onQuickAdd = (type: SessionType) => {
     nav.navigate('AddSession', { type, date: today, startStatus: 'Completed' });
   };
@@ -140,6 +190,7 @@ export default function TodayScreen() {
     haptics.success();
     setBurstKey((k) => k + 1);
     await updateSession(id, { status: 'Completed' });
+    toast.success('Marked completed');
     load(false);
   };
 
@@ -163,76 +214,89 @@ export default function TodayScreen() {
       const result = await generateDailyInsight({ force: true });
       setInsight(result);
       haptics.success();
+      toast.success('Insight updated');
     } catch (err: any) {
-      setInsightError(err?.message ?? 'Failed to generate insight');
+      const msg = err?.message ?? 'Failed to generate insight';
+      setInsightError(msg);
       haptics.error();
+      toast.error(msg);
     } finally {
       setInsightLoading(false);
     }
   };
 
+  const band = readinessBand(readiness.score);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView
+      <Animated.ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl tintColor={colors.text} refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
         <FadeInView delay={0} spring>
           <View style={styles.heroRow}>
-            <View>
-              <Text style={styles.dim}>{format(parseDateString(today), 'EEEE')}</Text>
-              <Text style={styles.h1}>{format(parseDateString(today), 'MMMM d')}</Text>
+            {/* Date + glowing Holy Moonlight Sword fill the left */}
+            <View style={styles.heroLeft}>
+              <View style={styles.heroDate}>
+                <Text style={styles.dim}>{format(parseDateString(today), 'EEEE')}</Text>
+                <Text style={styles.h1}>{format(parseDateString(today), 'MMMM d')}</Text>
+              </View>
+              <HolyMoonlightSword style={styles.sword} />
             </View>
+
+            {/* Controls — indicators stacked above the buttons, right-aligned */}
+            <View style={styles.heroControls}>
+              <View style={styles.heroIndicators}>
+              <Pressable
+                style={styles.streakChip}
+                onPress={() => { haptics.tap(); nav.navigate('Tabs', { screen: 'Calendar' } as any); }}
+              >
+                <Ionicons
+                  name="flame"
+                  size={15}
+                  color={bestStreak > 0 ? '#FF8A3D' : colors.textFaint}
+                />
+                <Text style={[styles.streakText, { color: bestStreak > 0 ? '#FF8A3D' : colors.textDim }]}>
+                  {bestStreak}w
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => { haptics.tap(); nav.navigate('Tabs', { screen: 'Week' } as any); }}>
+                <WeekDaysRing value={daysTrained} max={7} size={38} color={zelda.skyTeal} />
+              </Pressable>
+            </View>
+
             <View style={styles.heroBtns}>
               <Pressable style={styles.iconBtn} onPress={() => { haptics.tap(); nav.navigate('Goals'); }}>
-                <Ionicons name="flag-outline" size={18} color={colors.text} />
+                <Ionicons name="flag-outline" size={16} color={colors.text} />
                 <Text style={styles.iconBtnText}>Goals</Text>
               </Pressable>
               <Pressable style={styles.iconBtn} onPress={() => { haptics.tap(); nav.navigate('Backfill'); }}>
-                <Ionicons name="time-outline" size={18} color={colors.text} />
+                <Ionicons name="time-outline" size={16} color={colors.text} />
                 <Text style={styles.iconBtnText}>Backfill</Text>
               </Pressable>
+              <Pressable style={styles.gearBtn} onPress={() => { haptics.tap(); nav.navigate('Settings'); }}>
+                <Ionicons name="settings-outline" size={18} color={colors.text} />
+              </Pressable>
             </View>
+          </View>
           </View>
         </FadeInView>
 
         <FadeInView delay={60}>
-          <TrainingReadinessCard
-            readiness={readiness}
-            onPress={() => nav.navigate('Readiness')}
-          />
-        </FadeInView>
-
-        <FadeInView delay={120}>
-          <View style={styles.smartCardWrap}>
-            <LinearGradient
-              colors={gradientColors}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.smartGradient}
-            >
-              <Text style={styles.smartTitle}>Today's read</Text>
-              <TypewriterText text={smartMessage} style={styles.smartText} speed={16} delay={200} />
-              <View style={{ height: spacing.md }} />
-              <View style={styles.bigPctRow}>
-                <AnimatedNumber
-                  value={weekly.percentProjected}
-                  style={[styles.bigPct, { color: zone.color }]}
-                  suffix="%"
-                  duration={900}
-                />
-                <Text style={styles.bigPctSuffix}>of weekly target</Text>
-              </View>
-              <View style={{ height: spacing.sm }} />
-              <LoadBar
-                completedPercent={weekly.percentCompleted}
-                projectedPercent={weekly.percentProjected}
-              />
-            </LinearGradient>
+          <View onLayout={onCardLayout}>
+            <TrainingReadinessCard
+              readiness={readiness}
+              onPress={() => nav.navigate('Readiness')}
+              smartMessage={smartMessage}
+              completedPercent={weekly.percentCompleted}
+              projectedPercent={weekly.percentProjected}
+            />
           </View>
         </FadeInView>
 
@@ -334,8 +398,85 @@ export default function TodayScreen() {
           </Section>
         </FadeInView>
 
+        <FadeInView delay={520}>
+          <Section title="Nutrition">
+            <Pressable onPress={() => { haptics.tap(); nav.navigate('Nutrition', {}); }}>
+              <Card>
+                <View style={styles.nutHeader}>
+                  <View style={styles.nutTitleRow}>
+                    <Ionicons name="restaurant" size={16} color={colors.success} />
+                    <Text style={styles.nutTitle}>Food today</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+                </View>
+
+                <View style={styles.nutBody}>
+                  <View style={styles.nutMain}>
+                    <Text style={styles.nutKcal}>
+                      {calConsumed}
+                      {calGoal ? <Text style={styles.nutKcalGoal}> / {calGoal}</Text> : null}
+                    </Text>
+                    <Text style={styles.nutKcalLabel}>kcal eaten{calGoal ? '' : ' today'}</Text>
+                  </View>
+                  <View style={styles.nutSideStats}>
+                    <View style={styles.nutSideStat}>
+                      <Text style={styles.nutSideVal}>{calBurned > 0 ? calBurned : '—'}</Text>
+                      <Text style={styles.nutSideLbl}>Burned</Text>
+                    </View>
+                    {calGoal ? (
+                      <View style={styles.nutSideStat}>
+                        <Text style={[styles.nutSideVal, { color: calGoal - calConsumed >= 0 ? colors.success : colors.danger }]}>
+                          {Math.abs(calGoal - calConsumed)}
+                        </Text>
+                        <Text style={styles.nutSideLbl}>{calGoal - calConsumed >= 0 ? 'Left' : 'Over'}</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.nutSideStat}>
+                        <Text style={styles.nutSideVal}>{calConsumed - calBurned}</Text>
+                        <Text style={styles.nutSideLbl}>Net</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                {calGoal ? (
+                  <View style={styles.nutBarTrack}>
+                    <View style={[styles.nutBarFill, { width: `${calPct}%`, backgroundColor: calPct >= 100 ? colors.warn : colors.success }]} />
+                  </View>
+                ) : null}
+
+                <View style={styles.nutMacros}>
+                  <Text style={styles.nutMacro}>P <Text style={styles.nutMacroVal}>{proteinSum}g</Text></Text>
+                  <Text style={styles.nutMacro}>C <Text style={styles.nutMacroVal}>{carbsSum}g</Text></Text>
+                  <Text style={styles.nutMacro}>F <Text style={styles.nutMacroVal}>{fatSum}g</Text></Text>
+                  <Text style={styles.nutHint}>
+                    {foodEntries.length === 0 ? 'Tap to log food' : `${foodEntries.length} item${foodEntries.length === 1 ? '' : 's'} · tap for detail`}
+                  </Text>
+                </View>
+              </Card>
+            </Pressable>
+          </Section>
+        </FadeInView>
+
         <View style={{ height: spacing.xxl }} />
-      </ScrollView>
+      </Animated.ScrollView>
+
+      {/* Sticky banner — appears when user scrolls past the readiness card */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.stickyBanner,
+          { borderBottomColor: band.color + '66', backgroundColor: colors.bg + 'F2' },
+          bannerStyle,
+        ]}
+      >
+        <Text style={[styles.stickyLabel, { color: band.color }]}>READINESS</Text>
+        <Text style={[styles.stickyScore, { color: band.color }]}>{readiness.score}</Text>
+        <Text style={[styles.stickyBand, { color: band.color }]}>
+          {' · '}{band.label.toUpperCase()}
+        </Text>
+      </Animated.View>
+
       {burstKey > 0 && (
         <View pointerEvents="none" style={styles.burstLayer}>
           <TriforceBurst trigger={burstKey} count={22} radius={140} />
@@ -359,11 +500,49 @@ const styles = StyleSheet.create({
   container: { padding: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },
   heroRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: spacing.sm,
     marginBottom: spacing.sm,
   },
-  heroBtns: { flexDirection: 'row', gap: spacing.sm },
+  heroLeft: { flex: 1 },
+  heroControls: {
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+    flexShrink: 0,
+  },
+  heroDate: {},
+  sword: { marginTop: 6, width: '100%' },
+  heroIndicators: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  gearBtn: {
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderRadius: radius.pill,
+  },
+  streakChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: '#FF8A3D55',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+  },
+  streakText: { fontWeight: '800', fontSize: fontSize.sm },
+  heroBtns: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    flexShrink: 1,
+  },
   h1: { color: colors.text, fontSize: fontSize.display, fontWeight: '800', letterSpacing: -0.5 },
   dim: { color: colors.textDim, fontSize: fontSize.md },
   iconBtn: {
@@ -374,19 +553,27 @@ const styles = StyleSheet.create({
   },
   iconBtnText: { color: colors.text, fontWeight: '600', fontSize: fontSize.sm },
 
-  smartCardWrap: {
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
+  // Sticky readiness banner — thin one-line ticker that slides in from the
+  // top once the user scrolls past the training readiness card. Sits just
+  // below the tab navigator header, so it does NOT need to pad for a status
+  // bar — keep it minimal.
+  stickyBanner: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    paddingVertical: 4,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    zIndex: 50,
   },
-  smartGradient: { padding: spacing.md, gap: 4 },
-  smartTitle: { color: colors.textDim, fontSize: fontSize.sm, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
-  smartText: { color: colors.text, fontSize: fontSize.md, lineHeight: 22, marginTop: 4, minHeight: 44 },
-
-  bigPctRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: spacing.sm },
-  bigPct: { fontSize: fontSize.display, fontWeight: '900', letterSpacing: -1 },
-  bigPctSuffix: { color: colors.textDim, fontSize: fontSize.sm, fontWeight: '600' },
+  stickyLabel: {
+    fontSize: 9, fontWeight: '800', letterSpacing: 1.2,
+    marginRight: 6,
+  },
+  stickyScore: { fontSize: fontSize.sm, fontWeight: '900' },
+  stickyBand: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4 },
 
   plannedWrap: { gap: spacing.sm },
   plannedActions: { flexDirection: 'row', gap: spacing.sm },
@@ -396,6 +583,29 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   smallBtnText: { color: '#0B0F14', fontWeight: '700', fontSize: fontSize.sm },
+
+  // Nutrition summary panel
+  nutHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  nutTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  nutTitle: { color: colors.text, fontSize: fontSize.md, fontWeight: '800' },
+  nutBody: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: spacing.sm },
+  nutMain: {},
+  nutKcal: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '900', letterSpacing: -0.5 },
+  nutKcalGoal: { color: colors.textDim, fontSize: fontSize.lg, fontWeight: '700' },
+  nutKcalLabel: { color: colors.textDim, fontSize: fontSize.xs, marginTop: -2 },
+  nutSideStats: { flexDirection: 'row', gap: spacing.lg },
+  nutSideStat: { alignItems: 'flex-end' },
+  nutSideVal: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  nutSideLbl: { color: colors.textDim, fontSize: fontSize.xs, letterSpacing: 0.4 },
+  nutBarTrack: {
+    height: 7, backgroundColor: colors.surfaceAlt, borderRadius: radius.pill,
+    overflow: 'hidden', marginTop: spacing.sm,
+  },
+  nutBarFill: { height: '100%', borderRadius: radius.pill },
+  nutMacros: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm },
+  nutMacro: { color: colors.textDim, fontSize: fontSize.xs, fontWeight: '700' },
+  nutMacroVal: { color: colors.text, fontWeight: '800' },
+  nutHint: { color: colors.textFaint, fontSize: fontSize.xs, marginLeft: 'auto' },
 
   weekRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, justifyContent: 'space-between' },
   weekStat: { alignItems: 'center', minWidth: 44 },

@@ -3,11 +3,20 @@ export type SessionType =
   | 'Lift'
   | 'Run'
   | 'Rock Climb'
+  | 'Hiking'
   | 'Sauna'
   | 'Cold Plunge'
   | 'Sauna + Cold Plunge'
   | 'Rest'
   | 'Mobility / Recovery';
+
+/** Difficulty bands for Hiking — drive the hiking load multiplier. */
+export type HikingDifficulty =
+  | 'Easy / flat'
+  | 'Moderate'
+  | 'Hilly'
+  | 'Hard / steep'
+  | 'Very hard / mountain';
 
 export type SessionStatus =
   | 'Planned'
@@ -27,15 +36,25 @@ export interface Session {
   type: SessionType;
   subtype?: string;
   status: SessionStatus;
-  intensity?: number; // 0-10
+  intensity?: number; // 0-10 (RPE)
   location?: string;
   notes?: string;
   loadScore?: number;
   // Sauna + Cold Plunge optional components
   saunaMinutes?: number;
   coldPlungeMinutes?: number;
-  // Run-only
+  // Distance in miles. Run AND Hiking both use this (was Run-only `miles`,
+  // kept under that name for backward compatibility with stored sessions).
   miles?: number;
+  // --- Calorie/MET load-model fields (all optional) ---
+  // Actual active calories burned (from a watch / Strava). When present this is
+  // the preferred `baseEnergyEquivalent`; otherwise we estimate per activity.
+  activeCalories?: number;
+  // Hiking context (stored/displayed, NOT added directly to load).
+  elevationGainFeet?: number;
+  hikingDifficulty?: HikingDifficulty;
+  packWeightLbs?: number;
+  trailName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -67,11 +86,28 @@ export interface Settings {
   // User heart-rate bounds (used by RPE estimator). Defaults: 190 / 60.
   maxHeartRate?: number;
   restingHeartRate?: number;
+  // Body weight in kg — used for MET-based calorie estimates (Lift / Rock Climb
+  // / Hiking fallback) when active calories aren't known. Optional; falls back
+  // to DEFAULT_BODY_WEIGHT_KG in load.ts.
+  bodyWeightKg?: number;
   // Strava OAuth app credentials (user-created at strava.com/api).
   stravaClientId?: string;
   stravaClientSecret?: string;
+  // USDA FoodData Central API key (free at fdc.nal.usda.gov). Stored locally
+  // only; used for the nutrition food search.
+  usdaApiKey?: string;
+  // Daily calorie intake goal (kcal). Optional — drives the nutrition progress bar.
+  dailyCalorieGoal?: number;
   // One-time migration flag: sleep quality scale changed 1-10 → 1-100.
   sleepQualityMigratedToHundred?: boolean;
+  // One-time migration flag: per-session loadScore recomputed under the
+  // calorie/MET-equivalent model (replacing the old RPE×duration×mult model).
+  // Superseded by `loadModelVersion` but kept so old stored settings still parse.
+  loadModelMigratedToCalorie?: boolean;
+  // Version of the load model the stored `loadScore`s were last computed under.
+  // Bumped whenever the per-activity formulas change so a migration recomputes
+  // historical sessions onto the current scale.
+  loadModelVersion?: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -84,6 +120,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   maxHeartRate: 190,
   restingHeartRate: 60,
+  bodyWeightKg: 80,
 };
 
 // --- Strava tokens (stored separately from settings so we never log them) ---
@@ -148,4 +185,42 @@ export interface DailyInsight {
   reasoning: string;        // 1-2 sentence why
   focus: InsightFocus;
   model: string;            // claude model used
+}
+
+// --- Nutrition / calorie tracking --------------------------------------
+
+/** Energy + macros for a food, serving, or recipe (all optional except calories). */
+export interface FoodMacros {
+  calories: number;     // kcal
+  proteinG?: number;
+  carbsG?: number;
+  fatG?: number;
+}
+
+/** A single logged food on a given day. */
+export interface FoodEntry extends FoodMacros {
+  id: string;
+  date: string;                 // YYYY-MM-DD
+  name: string;
+  fdcId?: number;               // USDA FoodData Central id, if from search
+  /** Human label for the amount eaten, e.g. "150 g" or "1 × Overnight oats". */
+  servingDescription?: string;
+  /** Recipe this entry was added from, if any. */
+  recipeId?: string;
+  createdAt: string;
+}
+
+/** One ingredient inside a saved recipe (already scaled to its amount). */
+export interface RecipeIngredient extends FoodMacros {
+  name: string;
+  fdcId?: number;
+  servingDescription?: string;
+}
+
+/** A reusable named recipe. Top-level macros are the summed totals. */
+export interface Recipe extends FoodMacros {
+  id: string;
+  name: string;
+  ingredients: RecipeIngredient[];
+  createdAt: string;
 }

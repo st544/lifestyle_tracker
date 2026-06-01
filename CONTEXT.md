@@ -4,7 +4,7 @@
 
 ## What this app is
 
-A **lightweight training calendar** for one user (the owner of this repo). It tracks BJJ, lifts, runs, climbing, sauna, cold plunge, mobility, and rest days. It is not a generic habit tracker, not a Garmin replacement, not a life OS. The success metric is "can I log a session in under 30 seconds while walking off the mat?"
+A **lightweight training calendar** for one user (the owner of this repo). It tracks BJJ, lifts, runs, climbing, hiking, sauna, cold plunge, mobility, and rest days. It is not a generic habit tracker, not a Garmin replacement, not a life OS. The success metric is "can I log a session in under 30 seconds while walking off the mat?"
 
 Primary user journey:
 1. Open app → see today + the smart message.
@@ -37,6 +37,9 @@ Primary user journey:
 ├── app.json                   # newArchEnabled: true
 ├── tsconfig.json
 ├── CONTEXT.md  DESIGN.md  ROADMAP.md  README.md
+├── HEALTH_CONNECT.md          # PLANNED integration spec (Garmin→Health Connect→app, Android). Not built yet.
+├── DEV_BUILD_GUIDE.md         # How to compile/deploy a dev build to Android + re-enter API keys (needed for Health Connect)
+├── HEALTH_CONNECT_KICKOFF_PROMPT.md  # Paste-into-fresh-session prompt that builds the Health Connect integration
 └── src/
     ├── types.ts               # Session, Template, Settings, DailyLog, WeeklyChecklist, DailyInsight, SUPPLEMENTS
     ├── theme.ts               # colors, typeColors, typeIcons, zelda palette, rupeePalette
@@ -50,6 +53,7 @@ Primary user journey:
     ├── csv.ts                 # parseCsv — column auto-detection + row coercion for HRV/sleep/supplement import
     ├── wellness-insight.ts    # generateWellnessInsight — rule-based 7-day analysis (headline + body + tone, no API call)
     ├── load-form.ts           # calculateLoadForm — ACWR (acute:chronic workload ratio) with HRV/sleep-aware recovery penalty
+    ├── toast.ts               # Module-level toast singleton API — `toast.show / success / error / warn / info` from anywhere
     ├── messages.ts            # generateSmartMessage, projectedMessage
     ├── storage.ts             # all AsyncStorage CRUD: sessions, templates, settings, dailyLogs, weeklyChecklists, dailyInsights, last-seen
     ├── haptics.ts             # tap/tick/thunk/success/warn/error (wraps expo-haptics)
@@ -59,7 +63,8 @@ Primary user journey:
     │   ├── anthropic.ts       # callAnthropic (fetch-based; no SDK), INSIGHT_MODEL constant
     │   ├── insights.ts        # generateDailyInsight — builds 14-day prompt, calls Claude w/ structured outputs, caches by target date
     │   ├── strava.ts          # Strava OAuth + activity list (fetch-based; manual-paste auth flow)
-    │   └── strava-sync.ts     # syncStravaActivities — pulls new activities, dedupes, maps to Session via RPE estimator
+    │   ├── strava-sync.ts     # syncStravaActivities — pulls new activities, dedupes, maps to Session via RPE estimator
+    │   └── usda.ts            # USDA FoodData Central search (fetch-based) — searchFoods + scaleMacros (per-100g)
     ├── components/
     │   ├── Section.tsx        # Section header + Card container
     │   ├── Pill.tsx           # Animated chip with press scale + haptic
@@ -82,22 +87,31 @@ Primary user journey:
     │   ├── TrainingReadinessCard.tsx # Front-page card: ring + HRV/Sleep/Load lines with trend arrows + verdict
     │   ├── DurationInput.tsx  # Side-by-side hours + minutes inputs; stores decimal hours
     │   ├── PulseNumber.tsx    # Static text that pulses (scale 1→1.18→1) on value change. NO count-up — replaces AnimatedNumber for stat counts
-    │   └── LineChart.tsx      # Multi-series SVG line chart with tap-to-show tooltip, dual y-axis overlay, null-tolerant gaps
+    │   ├── LineChart.tsx      # Multi-series SVG line chart with tap-to-show tooltip, dual y-axis overlay, null-tolerant gaps
+    │   ├── ToastHost.tsx      # Mounted ONCE at app root; subscribes to the toast singleton + animates entries in/out
+    │   ├── ElevatedAddTab.tsx # Custom tabBarButton for the center "Add" tab — FAB-style raised primary-color circle
+    │   ├── DurationDropdown.tsx # Hours+minutes dropdown (Modal + ScrollView) for hiking duration entry
+    │   ├── FoodSearchModal.tsx  # USDA food search → pick → set grams → confirm; used by Nutrition + RecipeBuilder
+    │   ├── WeekDaysRing.tsx     # Tiny SVG progress ring (days trained this week) used in the Today hero
+    │   └── HolyMoonlightSword.tsx # Animated glowing SVG sword emblem (Bloodborne HMS, activated) under the Today date — gold hilt left, pulsing blue moonlight blade right
     └── screens/
-        ├── TodayScreen.tsx        # hero count-up, typewriter, gradient hero, DailyLogRow, DailyInsightCard, staggered cards, pull-to-refresh burst
-        ├── CalendarScreen.tsx     # month view, streak chips with ignition, milestone overlay (4/12/26/52 weeks)
+        ├── TodayScreen.tsx        # hero: date + glowing HolyMoonlightSword (left), streak flame chip + days-ring + Goals/Backfill/⚙ (right); TrainingReadinessCard, DailyLogRow, DailyInsightCard, Quick add, sessions, This week, Nutrition panel (last); pull-to-refresh burst
+        ├── CalendarScreen.tsx     # month view w/ custom day cells (original-size activity dots); each day's WELLNESS score renders as a small square (un-rounded) NEON-outlined tint around the date number (not a dot); today marker gated to the active month (no square dupe on adjacent months); streak chips with a continuous gradient sheen; milestone overlay (4/12/26/52 weeks)
         ├── DayDetailScreen.tsx    # tap a day → quick-add + per-session actions (mark complete / skip / move / delete)
         ├── AddTabScreen.tsx       # tiles per type, "Plan a session", templates list
         ├── AddSessionScreen.tsx   # one-screen form with live load preview, save morphs into checkmark + triforce burst
-        ├── WeekScreen.tsx         # totals, animated LoadBar, meal-prep checkbox, workout/recovery/miles, counts by type — week navigator (chevrons + "back to current week" chip) lets you scroll through past weeks
+        ├── WeekScreen.tsx         # totals, animated LoadBar, meal-prep checkbox, workout/recovery/miles, counts by type — week navigator; tapping the **Target** stat opens a modal to edit the global weekly load target (applies to every week)
         ├── TrendsScreen.tsx       # 4/8/12/26-week bar charts: load, sessions, minutes, miles, per-activity
         ├── BackfillScreen.tsx     # last 7 days with one-tap quick-add per type
-        ├── GoalsScreen.tsx        # per-activity weekly minimums, weekly load target, week-starts-on, max/resting HR, Strava button, Anthropic API key
+        ├── GoalsScreen.tsx        # GOALS ONLY now: per-activity weekly minimums, weekly load target, daily calorie goal (+ link to Settings)
+        ├── SettingsScreen.tsx     # device/integration settings split out of Goals: week-starts-on, max/resting HR, body weight, Strava, CSV import, export, USDA key, Anthropic key
         ├── DailyLogScreen.tsx     # Full modal for HRV / sleep / supplements / notes — supports past dates via the date picker
         ├── StravaSetupScreen.tsx  # One-time Strava OAuth setup (manual-paste flow), shows connection status, sync-now / disconnect
         ├── CsvImportScreen.tsx    # Pick a CSV file OR paste text → auto-detect columns → preview → bulk upsert daily logs
         ├── WellnessScreen.tsx     # 7-day HRV / sleep duration / sleep quality charts + rule-based wellness insight (headline+body)
-        └── ReadinessScreen.tsx    # Tap-to-open from TrainingReadinessCard. Line graph of readiness over time (14/30/60/90d) + day list to drill in
+        ├── ReadinessScreen.tsx    # Tap-to-open from TrainingReadinessCard. Line graph of readiness over time (14/30/60/90d) + day list to drill in
+        ├── NutritionScreen.tsx    # Daily food log — total vs goal, burned, macros, entries, recipe quick-add (Food button on Today)
+        └── RecipeBuilderScreen.tsx # Build a reusable recipe from USDA-searched ingredients with live summed totals
 ```
 
 ## Critical setup facts
@@ -115,7 +129,7 @@ Primary user journey:
 |---|---|
 | `training_sessions` | `Session[]` |
 | `training_templates` | `Template[]` |
-| `training_settings` | `Settings` (defaults: target 4000, weekStartsOn 'sunday', goals {BJJ:3, Lift:2, Run:2}, optional `anthropicApiKey`) |
+| `training_settings` | `Settings` (defaults: target 4000, weekStartsOn 'sunday', goals {BJJ:3, Lift:2, Run:2}, maxHeartRate 190, restingHeartRate 60, bodyWeightKg 80, optional `anthropicApiKey`) |
 | `training_daily_logs` | `DailyLog[]` — one record per date with HRV / sleep / supplements / notes |
 | `training_weekly_checklists` | `WeeklyChecklist[]` — meal-prep done per week (keyed by week-start date) |
 | `training_daily_insights` | `DailyInsight[]` — Claude's recommendations, capped at last 60 entries, keyed by target date (tomorrow) |
@@ -123,18 +137,42 @@ Primary user journey:
 | `training_strava_sync_state` | `{syncedIds: number[], lastSyncedAt: number}` — dedup set capped at 5000, high-water-mark unix seconds for incremental sync |
 | `training_last_seen_streaks` | `Record<SessionType, number>` — used for milestone detection on Calendar focus |
 | `training_last_seen_weekly_pct` | `number` — used for pull-to-refresh celebration on Today |
+| `training_food_entries` | `FoodEntry[]` — logged foods (one per item eaten), keyed by date |
+| `training_recipes` | `Recipe[]` — reusable named recipes (ingredient list + summed macros) |
 
 `seedDefaultsIfEmpty()` runs on TodayScreen mount and drops in 5 default templates if `training_templates` is empty.
 
-## Load math (don't change without telling the user)
+## Load math (calorie/MET-equivalent model — IMPLEMENTED)
+
+`src/load.ts` now uses the unified calorie/MET-equivalent model (the old `durationMinutes × intensity × typeMultiplier` model has been removed, along with `getTypeMultiplier`). Spec source: `CLAUDE_HIKING_LOAD_PROMPT.md`.
 
 ```
-loadScore = durationMinutes × intensity × typeMultiplier
+loadScore = baseEnergyEquivalent × stressMultiplier
 ```
 
-Multipliers and zones are pinned in `src/load.ts`. The user explicitly enumerated them — they are spec, not suggestions. If you change them, surface that in the response.
+`baseEnergyEquivalent` is **actual active calories when known** (`session.activeCalories`), otherwise an activity-specific calorie-equivalent estimate. `calculateLoadScore(input, bodyWeightKg?)` takes the user's body weight (from `Settings.bodyWeightKg`, default `DEFAULT_BODY_WEIGHT_KG = 80`) for the MET-based fallbacks. Storage (`addSession`/`updateSession`) reads `bodyWeightKg` from settings and recomputes `loadScore` whenever any load-relevant field changes (type/subtype/duration/intensity/activeCalories/hikingDifficulty/packWeightLbs).
 
-Zones:
+Per-activity rules (`baseEnergyEquivalent` → multiplier). **Hiking / Run / Lift use the v2 scheme below; BJJ / Rock Climb / recovery are unchanged.**
+- **BJJ** *(unchanged)*: calories if known, else `duration × RPE × 0.85`. Mult by subtype: Technique only 1.00 · Normal class 1.10 · Hard sparring 1.20 · Open mat 1.20 · Competition class 1.30.
+- **Run**: `activeCalories × runImpactMultiplier`. No calories → estimate `round(bodyWeightKg × MET × hours)` (METs 8.0–11.0 by subtype). Mult (capped **1.40**): Easy/Zone 2 0.90 · Long easy run 1.00 · Tempo 1.10 · Intervals 1.20 · Race/time trial 1.30 · Trail run 1.10 · Hilly run 1.15 · Downhill-heavy run 1.20.
+- **Lift**: `round(bodyWeightKg × MET × hours) × finalMultiplier` (uses calories instead of the MET estimate if provided). `finalMultiplier = baseMult + rpeAdjustment`, capped **1.45**. [MET, baseMult]: Maintenance/easy [3.5, 1.05] · Normal lift [4.5, 1.15] · Heavy upper [5.0, 1.20] · Heavy lower [5.5, 1.30] · Heavy full body [5.5, 1.25] · Kettlebell [5.5, 1.15] · Circuit [5.8, 1.10]. RPE adj: 1–4 −0.10 · 5–6 0 · 7–8 +0.05 · 9–10 +0.10 (RPE 0/unset → 0).
+- **Hiking**: `activeCalories × hikeImpactMultiplier`. No calories → estimate `round(bodyWeightKg × difficulty-MET × hours)` (METs 4.5–9.0). `hikeImpactMultiplier = 1 + difficultyBonus + elevationBonus + durationBonus + packBonus`, capped **1.75**:
+  - difficulty: Easy/flat 0 · Moderate 0.10 · Hilly 0.20 · Hard/steep 0.30 · Very hard/mountain 0.40
+  - elevation (`elevationGainFeet / miles`): <100 ft/mi 0 · 100–250 0.05 · 250–500 0.10 · 500–750 0.15 · >750 0.20
+  - duration: <2h 0 · 2–4h 0.05 · 4–6h 0.10 · 6h+ 0.15
+  - pack: 0–10 lb 0 · 10–25 0.05 · 25+ 0.10
+- **Rock Climb** *(unchanged)*: calories if known, else `bodyWeightKg × session-adjusted MET × hours`. [MET, mult]: Casual [3.5, 1.00] · Top rope/moderate [4.0, 1.05] · Bouldering [5.0, 1.20] · Hard bouldering [5.5, 1.30] · Limit [6.0, 1.35].
+- **Recovery types** *(unchanged)* (Sauna/Cold Plunge/Sauna+Cold/Mobility): low MET × small multiplier. **Rest = 0**.
+
+Legacy subtype names (`Normal Class`, `Zone 2`, `Long Run`, `Maintenance`, `Upper`, `Lower`, `Full Body`, `Top Rope`, `Lead`, `Casual`, etc.) are still recognized by the multiplier switches, so old stored sessions keep calculating.
+
+Rules that still hold: do **not** use raw `RPE × duration` as the final score; do **not** add run/hike distance or hiking elevation directly to load (stored/displayed only — calories already reflect them; hiking elevation feeds only the *multiplier* bonus). Only `date`, `type`, `durationMinutes`, `status` are required.
+
+**Migration:** `migrateLoadScoresIfNeeded()` (in `storage.ts`, run on TodayScreen mount, gated by `Settings.loadModelVersion` vs `CURRENT_LOAD_MODEL_VERSION`) recomputes every existing session's `loadScore` whenever the model version is bumped, so historical trends/ACWR stay on one consistent scale. Non-destructive (loadScore is derived). **v1** = initial calorie/MET model; **v2** = hiking additive-bonus model + expanded run types + lifting RPE adjustment.
+
+> **Note on magnitude:** because the model changed from RPE-duration to calorie-equivalent, absolute load numbers shifted somewhat. The 4000 weekly target default is unchanged but the user may want to re-tune it in Goals.
+
+Zones (unchanged, in `getLoadZone`):
 - 0–40% Light · 40–70% Moderate · 70–90% Productive · 90–110% High · 110%+ Overreaching
 
 ## Training Readiness (composite 0-100, forward-looking)
@@ -158,7 +196,7 @@ Bands:
 
 ## Load Form / ACWR (separate from per-session loadScore)
 
-`src/load-form.ts` exposes `calculateLoadForm()` — the **Acute:Chronic Workload Ratio** used in sport science (Gabbett et al.). This is a **derived aggregate** built on top of per-session `loadScore`; it does NOT modify the canonical formula `loadScore = durationMinutes × intensity × typeMultiplier` (which is user-spec'd and pinned).
+`src/load-form.ts` exposes `calculateLoadForm()` — the **Acute:Chronic Workload Ratio** used in sport science (Gabbett et al.). This is a **derived aggregate** built on top of per-session `loadScore` (now the calorie/MET-equivalent score); it does NOT define its own per-session formula. It keeps working unchanged because it only reads `s.loadScore`.
 
 - `acuteLoad` = sum of last 7 days of completed `loadScore`
 - `chronicLoad` = (last 28 days sum) / 4 (a 7-day-equivalent rolling baseline)
@@ -171,6 +209,21 @@ Shown on WeekScreen below the LoadBar / totals card. Past weeks show the ratio a
 ## Export
 
 `exportAllAsJson()` in `storage.ts` returns a single JSON dump with all training data. **Strips** `anthropicApiKey`, `stravaClientId`, `stravaClientSecret`, and the Strava tokens — the export is for backup/portability, not credential leakage. Exposed via a button in Goals & Settings using `expo-sharing` + the new `expo-file-system` `File` API.
+
+## TrainingReadinessCard is the Today hero (merged)
+
+`TrainingReadinessCard` on the Today screen now optionally includes a "Today's read" sub-section (smart message + big projected % + LoadBar). When TodayScreen passes `smartMessage`, `completedPercent`, and `projectedPercent`, the card renders the merged view; otherwise it's just the readiness portion. This replaces what used to be two stacked cards (readiness + gradient smart-message card) — one combined hero card instead.
+
+A **sticky banner** (`READINESS XX · BAND`) appears at the top of Today when the user scrolls past the readiness card, using Reanimated's `useAnimatedScrollHandler`. The card's bottom Y is captured via `onLayout` into a shared value; the banner's `opacity` + `translateY` interpolate when `scrollY > cardBottomY`.
+
+## Toast system
+
+`src/toast.ts` is a module-level singleton — anything can call `toast.show('Saved')`, `toast.success('...')`, etc. `ToastHost` is mounted ONCE inside the NavigationContainer at the app root, subscribes to the singleton, and animates entries in/out (slide-up + fade via Reanimated). Wired across all action sites: save/delete sessions, mark complete, Strava sync, daily insight refresh, CSV import, settings save, JSON export, Strava connect/disconnect.
+
+## Tab bar
+
+- Every tab uses `AnimatedTabIcon` which now renders a translucent **pill background** behind the icon when focused (color tinted by `tabBarActiveTintColor`).
+- The center "Add" tab uses a **custom `tabBarButton`** (`ElevatedAddTab`) instead — a raised primary-color filled circle that visually breaks out of the tab bar via negative `marginTop` + `tabBarStyle.overflow: 'visible'`. The label is hidden for this tab (icon-only FAB).
 
 ## Two distinct scores on Today (intentional)
 
@@ -217,14 +270,14 @@ Lives in `src/api/strava.ts` (HTTP client) and `src/api/strava-sync.ts` (the run
 - Refreshes the access token if expiring within 60s
 - Fetches activities `after` the stored `lastSyncedAt` (initial backfill = 30 days)
 - Skips any activity ID already in `syncedIds`
-- Maps `sport_type` → our `SessionType` (Run/Lift/Mobility/Climb), plus name-based overrides for BJJ, climbing, sauna, plunge, mobility
+- Maps `sport_type` → our `SessionType` (Run/Hiking/Lift/Mobility/Climb), plus name-based overrides for BJJ, climbing, sauna, plunge, mobility. `Hike` → Hiking (was previously skipped), preserving distance, elevation gain (m→ft), and active calories when present; difficulty is inferred from elevation-per-mile
 - Estimates RPE via `estimateRpe()` from duration + HR vs the user's `Settings.maxHeartRate`
 - Infers Run subtype (Zone 2 / Tempo / Intervals / Long Run) via `inferRunSubtype()`
 - Computes load score and writes a `Session` with `status: 'Completed'` and `notes: "Strava: <activity name>"`
 
 **RPE algorithm** (`src/rpe.ts`): five-band map of `%HRmax → base RPE` (2/3/5/7/8/9/10), plus a duration modifier (`±0.5–1`) and a peak-effort bias (`+0.5` when max-HR-in-activity ≥ 95% of user max), clamped to [1, 10]. Returns `undefined` if HR isn't usable so the sync layer can fall back to type-based defaults.
 
-**Unmapped activity types** (Ride, Swim, Walk, Hike, etc.) are silently skipped — they'd need new `SessionType` entries first.
+**Unmapped activity types** (Ride, Swim, Walk, etc.) are silently skipped.
 
 ## Daily AI insight pipeline (Anthropic)
 
@@ -238,6 +291,16 @@ The Anthropic API is called **at most once per target date** (cached in `trainin
 - `DailyInsightCard` on Today shows the cached insight; refresh button calls `generateDailyInsight({force: true})`.
 
 If the user hasn't entered an API key, the card shows a "Set API key" CTA that navigates to Goals.
+
+## Nutrition / calorie tracking (MyFitnessPal-lite)
+
+A lightweight food/calorie tracker layered onto the training app. Calories *consumed* complement the per-session `activeCalories` *burned* so the user can see energy balance.
+
+- **Data source:** USDA FoodData Central (`src/api/usda.ts`, fetch-based — same no-SDK pattern as Anthropic/Strava). `searchFoods(query, apiKey)` returns simplified results with macros normalized **per 100 g**; `scaleMacros(per100, grams)` scales to the amount eaten. Requires a free USDA API key stored in `Settings.usdaApiKey` (entered in Goals & Settings). **Do not re-introduce an SDK** — keep it fetch-only for Expo Go safety.
+- **Types** (`types.ts`): `FoodMacros` (calories + optional protein/carbs/fat), `FoodEntry` (a logged food on a date), `RecipeIngredient`, `Recipe` (named ingredient list with summed totals).
+- **Storage** (`storage.ts`): `getFoodEntriesForDate` / `addFoodEntry` / `deleteFoodEntry` / `getCaloriesForDate`; `getRecipes` / `addRecipe` / `deleteRecipe`. Food entries + recipes are included in `exportAllAsJson` (USDA key stripped).
+- **Screens:** `NutritionScreen` (modal, reached via the **Food** button in the Today hero row) — daily total vs `Settings.dailyCalorieGoal`, calories burned (sum of that day's session `activeCalories`), protein/carb/fat totals, today's entries (delete), and saved-recipe quick-add. `RecipeBuilderScreen` (modal) builds a recipe from searched ingredients with live summed totals. Both use the shared `FoodSearchModal` component (search → pick → set grams → confirm).
+- **Scope note:** intentionally an MVP — no barcode scanning, micros, or per-meal grouping. The app's North Star is still training; nutrition is a complementary surface, not the main event.
 
 ## Animation system (Zelda inspired)
 
@@ -259,7 +322,7 @@ See **DESIGN.md** for the full philosophy. Quick reference:
 
 ## Things I should NOT do without asking
 
-- Change the load multipliers or zone thresholds.
+- Change load zone thresholds or the per-activity calorie/MET multipliers without asking. They're enumerated in `CLAUDE_HIKING_LOAD_PROMPT.md` and implemented in `src/load.ts` — treat them as spec.
 - Add a native module that requires a custom dev build. Expo Go compatibility is a hard requirement.
 - Add notifications without asking. The user hasn't requested them.
 

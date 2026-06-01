@@ -2,8 +2,9 @@
  * Load Form — Acute:Chronic Workload Ratio (ACWR), the sport-science
  * standard for "are you doing too much vs your recent baseline?"
  *
- * We DO NOT change the per-session `loadScore` formula (that's user-spec'd):
- *   loadScore = durationMinutes × intensity × typeMultiplier
+ * We DO NOT change the per-session `loadScore` formula (that's defined in
+ * load.ts as the calorie/MET-equivalent model: baseEnergyEquivalent ×
+ * stressMultiplier).
  *
  * This is a *derived* aggregate that uses the same loadScore values to
  * answer a different question:

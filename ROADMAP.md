@@ -14,9 +14,9 @@
 - AsyncStorage persistence (sessions / templates / settings / last-seen snapshots)
 
 ### Tracking
-- 9 session types, 5 statuses
-- Per-type defaults (duration / RPE / subtypes / locations)
-- Load calculation with type+subtype multipliers
+- 10 session types (incl. **Hiking**), 5 statuses
+- Per-type defaults (duration / RPE / subtypes / locations); Hiking uses difficulty + pack weight + elevation + trail name
+- **Calorie/MET-equivalent load model** (`loadScore = baseEnergyEquivalent × stressMultiplier`): active calories when known, RPE/MET fallbacks otherwise. Replaced the old `duration × intensity × multiplier` model. Body weight (kg) in Settings drives MET fallbacks. See `CLAUDE_HIKING_LOAD_PROMPT.md` + CONTEXT.md "Load math".
 - Weekly load zones (Light → Overreaching)
 - Smart message generator on Today (varies by load and recent-day intensity)
 - Optional `miles` field on Run sessions
@@ -59,6 +59,14 @@
 - **Daily AI insight** — calls Anthropic API with last 14 days of data, returns one specific recommendation for tomorrow, cached by target date so we hit the API at most once per day
 - Anthropic API key field in Goals & Settings, stored locally only
 
+### Nutrition (MyFitnessPal-lite, MVP)
+- USDA FoodData Central food search (`src/api/usda.ts`, fetch-based; free API key in Goals)
+- Daily food log (`NutritionScreen`, reached via the Today **Food** button): calories eaten vs `dailyCalorieGoal`, calories burned (from session `activeCalories`), protein/carb/fat totals, per-entry delete
+- Reusable **recipes** built from searched ingredients (`RecipeBuilderScreen`) with summed macros; one-tap to log
+- Shared `FoodSearchModal` (search → pick → grams → confirm); macros normalized per-100g and scaled
+- Food entries + recipes included in JSON export (USDA key stripped)
+- Scope: no barcode scan / micros / meal grouping yet — see ideas below
+
 ### Layout/UX fixes
 - Tab bar respects safe-area bottom inset (Android edge-to-edge nav)
 - GestureHandlerRootView at app root
@@ -66,7 +74,7 @@
 
 ## Planned next (priority order)
 
-1. **HRV / sleep auto-import from a watch.** Currently manual entry. Garmin SDK is out (user explicitly declined), but Apple Health / Google Fit read might be acceptable later — would need a custom dev build (HealthKit / Health Connect aren't in Expo Go).
+1. **HRV / sleep auto-import from a watch — SPEC'D, ready to build.** Garmin → Health Connect → app (Android). Full plan in `HEALTH_CONNECT.md`; dev-build/deploy steps in `DEV_BUILD_GUIDE.md`; one-shot build prompt in `HEALTH_CONNECT_KICKOFF_PROMPT.md`. Requires leaving Expo Go for a development build (native module). Google Fit is NOT the path — it's being shut down; Health Connect is the replacement. iOS/HealthKit is a separate parallel task later.
 2. **Insight history view.** Cached insights are kept (last 60) but not browsable. Add a "Past insights" screen so the user can see which recommendations they followed and how the week unfolded.
 3. **Streak/quality of compliance.** Track whether the user actually followed each day's insight (manual check). Feed back into the next day's prompt as additional context.
 4. **Sounds.** `src/sounds.ts` is a stub. Drop short Zelda-style chimes into `assets/sounds/` and wire them up via `expo-audio`:
@@ -80,6 +88,13 @@
 5. **Copy-previous-session shortcut.** Long-press an existing SessionCard → "Duplicate" option that opens AddSession with everything but date pre-filled to today.
 6. **PR detection.** Track personal records (longest run, heaviest week load, longest streak) and fire `CelebrationOverlay` when a PR is set. Storage: `training_personal_records`.
 7. **Heart-rate inspired RPE picker.** Replace the 0–10 dot row with a small SVG heart that fills as RPE rises, in `heartRed` from the Zelda palette.
+
+## Nutrition — possible follow-ups
+- Barcode scanning (would add `expo-camera`/`expo-barcode-scanner` — still Expo Go compatible).
+- Macro goals + a macro progress ring (protein/carb/fat targets), not just a calorie goal.
+- Per-meal grouping (breakfast/lunch/dinner/snack) and recently-eaten quick list.
+- Net-energy surface on Today (calories in vs out vs BMR) feeding into recovery context.
+- Editable recipes + scaling a recipe by servings when logging.
 
 ## Mid-term ideas
 
@@ -98,11 +113,12 @@
 ## Explicitly ruled out (don't propose these)
 
 - **Direct Garmin Health API integration.** Requires partner approval and a backend. The Strava sync covers ~90% of the same data (activities + HR + distance + suffer score) since Garmin Connect auto-syncs everything to Strava — go through that instead.
-- **Apple Watch / HealthKit / Health Connect.** Would unlock auto-HRV/sleep import, but requires leaving Expo Go for a custom dev build. Not done yet; revisit if manual daily-log entry becomes friction.
+- **Health Connect (Android).** No longer ruled out — spec'd and ready to build (see `HEALTH_CONNECT.md`). Moved to "planned next #1." Accepts the Expo-Go→dev-build trade-off.
+- **Apple Watch / HealthKit (iOS).** Still deferred. Same write targets as Health Connect, different native module; build as a parallel path after the Android one proves out.
 - **Generic habit tracker features.** This is a training calendar, not Streaks/Done/etc.
 - **Authentication.** Local-first, single user.
 - **Notifications.** User hasn't asked. Don't add without explicit request — push notifications need extra setup and feel like nagging.
-- **AI/LLM features.** Not requested. The "smart message" is a deterministic rule, not an LLM call.
+- **Additional AI/LLM features beyond the current Daily AI insight.** The repo already has an Anthropic-powered daily insight card; don't add more LLM surfaces without explicit request.
 
 ## Open questions for the user
 

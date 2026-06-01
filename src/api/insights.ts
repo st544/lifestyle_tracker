@@ -13,11 +13,12 @@ const SYSTEM_PROMPT = `You are a thoughtful, evidence-based training coach for a
 - Strength training (lifting, kettlebells)
 - Running (zone 2 through intervals)
 - Rock climbing
+- Hiking (distance + elevation, sometimes with a pack)
 - Recovery work: sauna, cold plunge, mobility
 
 You are given the past 14 days of:
-- Training sessions (type, subtype, duration, intensity RPE 0-10, load score, status)
-- Daily wellness logs (HRV in ms, sleep hours, sleep quality 1-10, supplements taken)
+- Training sessions (type, subtype/difficulty, duration, intensity RPE 0-10, distance, elevation, active calories, load score, status). Load is a calorie/MET-equivalent score: active calories (or an estimate) × an activity stress multiplier — not raw RPE×duration.
+- Daily wellness logs (HRV in ms, sleep hours, sleep quality 0-100, supplements taken)
 - Weekly training load relative to a configurable target
 
 Your job: produce ONE specific, actionable recommendation for TOMORROW.
@@ -84,10 +85,12 @@ function buildContext({ sessions, dailyLogs, settings, today }: BuildContextArgs
     }
     for (const s of daysSessions) {
       const score = s.loadScore ?? 0;
-      const sub = s.subtype ? ` ${s.subtype}` : '';
-      const rpe = s.intensity != null ? ` RPE${s.intensity}` : '';
-      const miles = s.type === 'Run' && typeof s.miles === 'number' ? ` ${s.miles}mi` : '';
-      parts.push(`  session: ${s.type}${sub} ${s.durationMinutes}min${rpe}${miles} load=${score} (${s.status})`);
+      const sub = s.subtype ? ` ${s.subtype}` : (s.type === 'Hiking' && s.hikingDifficulty ? ` ${s.hikingDifficulty}` : '');
+      const rpe = s.intensity != null && s.intensity > 0 ? ` RPE${s.intensity}` : '';
+      const miles = (s.type === 'Run' || s.type === 'Hiking') && typeof s.miles === 'number' ? ` ${s.miles}mi` : '';
+      const elev = s.type === 'Hiking' && typeof s.elevationGainFeet === 'number' ? ` ${s.elevationGainFeet}ft` : '';
+      const cals = typeof s.activeCalories === 'number' ? ` ${s.activeCalories}cal` : '';
+      parts.push(`  session: ${s.type}${sub} ${s.durationMinutes}min${rpe}${miles}${elev}${cals} load=${score} (${s.status})`);
     }
     if (parts.length === 0) parts.push('  (no logs)');
     dayLines.push(`${d} ${format(parseDateString(d), 'EEE')}:\n${parts.join('\n')}`);

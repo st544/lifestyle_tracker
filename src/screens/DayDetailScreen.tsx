@@ -17,6 +17,7 @@ import { Section, Card } from '../components/Section';
 import { QuickAddBar } from '../components/QuickAddBar';
 import { DailyLogRow } from '../components/DailyLogRow';
 import * as haptics from '../haptics';
+import { toast } from '../toast';
 import { RootStackParamList } from '../navigation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'DayDetail'>;
@@ -76,9 +77,9 @@ export default function DayDetailScreen() {
         s.type,
         s.subtype ?? '',
         [
-          { text: 'Mark Completed', onPress: async () => { await updateSession(s.id, { status: 'Completed' }); load(); } },
+          { text: 'Mark Completed', onPress: async () => { await updateSession(s.id, { status: 'Completed' }); toast.success('Marked completed'); load(); } },
           { text: 'Edit / Duration', onPress: () => nav.navigate('AddSession', { sessionId: s.id }) },
-          { text: 'Skip', onPress: async () => { await updateSession(s.id, { status: 'Skipped' }); load(); } },
+          { text: 'Skip', onPress: async () => { await updateSession(s.id, { status: 'Skipped' }); toast.info('Skipped'); load(); } },
           { text: 'Move', onPress: () => nav.navigate('AddSession', { sessionId: s.id }) },
           { text: 'Delete', style: 'destructive', onPress: () => onDelete(s.id) },
           { text: 'Cancel', style: 'cancel' },
@@ -94,7 +95,7 @@ export default function DayDetailScreen() {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
-        onPress: async () => { await deleteSession(id); load(); },
+        onPress: async () => { await deleteSession(id); toast.info('Session deleted'); load(); },
       },
     ]);
   };

@@ -178,6 +178,8 @@ export interface StravaActivity {
   total_elevation_gain?: number;        // meters
   average_heartrate?: number;
   max_heartrate?: number;
+  calories?: number;                    // kcal (present on detail; sometimes on summary)
+  kilojoules?: number;                  // work in kJ (rides) — fallback energy proxy
   suffer_score?: number | null;
   trainer?: boolean;
   manual?: boolean;

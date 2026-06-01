@@ -27,7 +27,7 @@ export default function AddTabScreen() {
 
   const today = todayString();
 
-  const openAddForType = (type: SessionType, startStatus: SessionStatus = 'Completed') => {
+  const openAddForType = (type: SessionType, startStatus: 'Planned' | 'Completed' = 'Completed') => {
     nav.navigate('AddSession', { type, date: today, startStatus });
   };
 

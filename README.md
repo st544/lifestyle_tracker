@@ -1,8 +1,10 @@
 # Training Calendar
 
-A mobile-first, Expo Go–compatible training calendar built with React Native + TypeScript. Plan and log BJJ, lifts, runs, climbing, sauna, cold plunge, and rest — and see your weekly training load at a glance.
+A mobile-first, Expo Go–compatible training calendar built with React Native + TypeScript. Plan and log BJJ, lifts, runs, climbing, hiking, sauna, cold plunge, and rest — and see your weekly training load at a glance.
 
-No backend. No accounts. Everything is persisted locally with AsyncStorage.
+No backend. No accounts. Everything is persisted locally with AsyncStorage. Includes a lightweight calorie/macro tracker (USDA FoodData Central search + reusable recipes) to complement the calories you burn training.
+
+Training load uses a unified **calorie/MET-equivalent** model (`loadScore = baseEnergyEquivalent × stressMultiplier`) — active calories when your watch provides them, activity-specific estimates otherwise. See [CLAUDE_HIKING_LOAD_PROMPT.md](./CLAUDE_HIKING_LOAD_PROMPT.md) for the full spec.
 
 ---
 
@@ -42,8 +44,9 @@ Four primary tabs, plus a few modal screens:
 | Add           | Big tiles per type, "Plan a session", and saved templates          |
 | This Week     | Completed vs planned load, counts by type, full week's sessions    |
 | Day Detail    | All sessions for one day; planned → completed / skip / move / edit |
-| Add Session   | One-screen form: type, date, time, duration, RPE, subtype, notes   |
+| Add Session   | One-screen form with activity-specific fields (RPE, distance, calories, hiking difficulty/elevation/pack, etc.) + live load preview |
 | Backfill Week | Last 7 days, one tap = one default session (catch up fast)         |
+| Nutrition     | Daily calorie/macro log via USDA food search + reusable recipes (Food button on Today) |
 
 Design principles baked in:
 - Most sessions log in under 30 seconds via quick-add or templates.
@@ -95,7 +98,7 @@ See `src/types.ts`. Summary:
 
 ```ts
 type SessionType =
-  | 'BJJ' | 'Lift' | 'Run' | 'Rock Climb'
+  | 'BJJ' | 'Lift' | 'Run' | 'Rock Climb' | 'Hiking'
   | 'Sauna' | 'Cold Plunge' | 'Sauna + Cold Plunge'
   | 'Rest' | 'Mobility / Recovery';
 
@@ -111,12 +114,18 @@ interface Session {
   startTime?: string;      // HH:mm
   endTime?: string;
   subtype?: string;
-  intensity?: number;      // 0–10
+  intensity?: number;      // 0–10 (RPE)
   location?: string;
   notes?: string;
   loadScore?: number;
   saunaMinutes?: number;
   coldPlungeMinutes?: number;
+  miles?: number;              // distance — Run AND Hiking
+  activeCalories?: number;     // preferred load base when known
+  elevationGainFeet?: number;  // Hiking
+  hikingDifficulty?: HikingDifficulty;
+  packWeightLbs?: number;      // Hiking
+  trailName?: string;          // Hiking
 
   createdAt: string;
   updatedAt: string;
@@ -128,41 +137,42 @@ interface Template {
   location?: string; startTime?: string; notes?: string; createdAt: string;
 }
 
-interface Settings { defaultWeeklyTargetLoad: number; weekStartsOn: 'monday' | 'sunday'; }
+interface Settings {
+  defaultWeeklyTargetLoad: number;
+  weekStartsOn: 'monday' | 'sunday';
+  bodyWeightKg?: number;   // MET-based calorie fallbacks (default 80)
+  // …plus goals, heart-rate bounds, Strava creds, Anthropic key
+}
 ```
 
 ---
 
 ## 5. Load calculation
 
-`src/load.ts`:
+`src/load.ts` implements a unified **calorie/MET-equivalent** model (the old `duration × intensity × typeMultiplier` model has been replaced):
 
 ```
-loadScore = durationMinutes × intensity × typeMultiplier
+loadScore = baseEnergyEquivalent × stressMultiplier
 ```
 
-Type multipliers exactly as specified:
+`baseEnergyEquivalent` is actual **active calories** when known (`session.activeCalories`). When not known, it's an activity-specific calorie-equivalent estimate (`round(bodyWeightKg × MET × hours)` for Run/Lift/Climb/Hiking; `duration × RPE × 0.85` for BJJ). `calculateLoadScore(input, bodyWeightKg?)` takes the user's body weight (`Settings.bodyWeightKg`, default 80) for the MET fallbacks. Distance, pace, and elevation are stored/displayed as context only — never added directly to load.
 
-| Type / subtype             | Mult |
-|----------------------------|------|
-| BJJ Technique              | 1.0  |
-| BJJ Normal Class           | 1.2  |
-| BJJ Hard Sparring          | 1.4  |
-| BJJ Open Mat               | 1.3  |
-| BJJ Competition Class      | 1.5  |
-| Lift                       | 1.1  |
-| Run Zone 2                 | 0.8  |
-| Run Tempo                  | 1.2  |
-| Run Intervals              | 1.4  |
-| Run Long Run               | 1.2  |
-| Rock Climb                 | 0.9  |
-| Sauna                      | 0.3  |
-| Cold Plunge                | 0.2  |
-| Sauna + Cold Plunge        | 0.3  |
-| Mobility / Recovery        | 0.2  |
-| Rest                       | 0    |
+Multipliers (per subtype/difficulty):
 
-Weekly target defaults to **4000**. Zones:
+| Activity | Multiplier |
+|---|---|
+| BJJ | Technique only 1.00 · Normal class 1.10 · Hard sparring 1.20 · Open mat 1.20 · Competition class 1.30 |
+| **Run** (cap 1.40) | Easy/Zone 2 0.90 · Long easy run 1.00 · Tempo 1.10 · Intervals 1.20 · Race/time trial 1.30 · Trail run 1.10 · Hilly run 1.15 · Downhill-heavy run 1.20 |
+| **Lift** (cap 1.45) | base by type (Maintenance/easy 1.05 · Normal 1.15 · Heavy upper 1.20 · Heavy lower 1.30 · Heavy full body 1.25 · Circuit 1.10 · Kettlebell 1.15) **+ RPE adj** (1–4 −0.10 · 5–6 0 · 7–8 +0.05 · 9–10 +0.10) |
+| Rock Climb | Casual 1.00 · Top rope/moderate 1.05 · Bouldering 1.20 · Hard bouldering 1.30 · Limit 1.35 |
+| **Hiking** (cap 1.75) | `1 + difficultyBonus + elevationBonus + durationBonus + packBonus` — difficulty (flat 0 → mountain 0.40), elevation/mile (<100 ft/mi 0 → >750 0.20), duration (<2h 0 → 6h+ 0.15), pack (0–10 lb 0 → 25+ 0.10) |
+| Recovery | Sauna/Sauna+Cold 0.50 · Cold Plunge 0.30 · Mobility 1.00 · Rest 0 |
+
+Legacy subtype names (`Normal Class`, `Zone 2`, `Long Run`, `Top Rope`, …) still map correctly so older stored sessions keep calculating.
+
+Required session fields remain `date`, `type`, `durationMinutes`, and `status`. Everything else stays optional and activity-specific so quick entry remains fast.
+
+Weekly target defaults to **4000** (you may want to re-tune it in Goals now that the load scale changed). Zones:
 
 | Percent of target | Zone                  |
 |-------------------|-----------------------|
@@ -193,7 +203,7 @@ Keys used:
 - `training_templates`
 - `training_settings`
 
-`updateSession` automatically recomputes `loadScore` when type/subtype/duration/intensity change, so the load is always consistent.
+`updateSession` automatically recomputes `loadScore` (using `Settings.bodyWeightKg`) when any load-relevant field changes — type / subtype / duration / intensity / activeCalories / hikingDifficulty / packWeightLbs — so the load is always consistent.
 
 ---
 

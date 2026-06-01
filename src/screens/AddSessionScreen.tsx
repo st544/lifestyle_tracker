@@ -9,13 +9,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { TriforceBurst } from '../components/TriforceBurst';
 import { SaveCheckmark } from '../components/SaveCheckmark';
 import * as haptics from '../haptics';
+import { toast } from '../toast';
 
 import { colors, spacing, fontSize, radius, typeColors } from '../theme';
-import { Session, SessionStatus, SessionType, Settings, DEFAULT_SETTINGS } from '../types';
+import {
+  Session, SessionStatus, SessionType, Settings, DEFAULT_SETTINGS, HikingDifficulty,
+} from '../types';
 import {
   addSession, updateSession, deleteSession, getSessions, getSettings, addTemplate,
 } from '../storage';
-import { TYPE_DEFAULTS, ALL_TYPES } from '../defaults';
+import { TYPE_DEFAULTS, ALL_TYPES, HIKING_DIFFICULTIES, DEFAULT_HIKING_DIFFICULTY } from '../defaults';
 import { calculateLoadScore, calculateWeeklyLoad } from '../load';
 import {
   todayString, parseDateString, toDateString, formatLong, parseTime, timeFromDate,
@@ -23,6 +26,7 @@ import {
 } from '../dates';
 import { projectedMessage } from '../messages';
 import { Pill } from '../components/Pill';
+import { DurationDropdown } from '../components/DurationDropdown';
 import { Section, Card } from '../components/Section';
 import { RootStackParamList } from '../navigation';
 
@@ -52,6 +56,11 @@ export default function AddSessionScreen() {
   const [saunaMin, setSaunaMin] = useState<number | undefined>(undefined);
   const [plungeMin, setPlungeMin] = useState<number | undefined>(undefined);
   const [miles, setMiles] = useState<string>('');
+  const [activeCalories, setActiveCalories] = useState<string>('');
+  const [elevationGain, setElevationGain] = useState<string>('');
+  const [packWeight, setPackWeight] = useState<string>('');
+  const [trailName, setTrailName] = useState<string>('');
+  const [hikingDifficulty, setHikingDifficulty] = useState<HikingDifficulty>(DEFAULT_HIKING_DIFFICULTY);
 
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
@@ -84,6 +93,11 @@ export default function AddSessionScreen() {
           setSaunaMin(existing.saunaMinutes);
           setPlungeMin(existing.coldPlungeMinutes);
           setMiles(existing.miles !== undefined ? String(existing.miles) : '');
+          setActiveCalories(existing.activeCalories !== undefined ? String(existing.activeCalories) : '');
+          setElevationGain(existing.elevationGainFeet !== undefined ? String(existing.elevationGainFeet) : '');
+          setPackWeight(existing.packWeightLbs !== undefined ? String(existing.packWeightLbs) : '');
+          setTrailName(existing.trailName ?? '');
+          setHikingDifficulty(existing.hikingDifficulty ?? DEFAULT_HIKING_DIFFICULTY);
         }
       }
     })();
@@ -102,6 +116,15 @@ export default function AddSessionScreen() {
       setSaunaMin(40);
       setPlungeMin(5);
     }
+    // Clear activity-specific optional fields that don't apply to the new type.
+    if (nextType !== 'Run' && nextType !== 'Hiking') setMiles('');
+    setActiveCalories('');
+    if (nextType !== 'Hiking') {
+      setElevationGain('');
+      setPackWeight('');
+      setTrailName('');
+    }
+    setHikingDifficulty(DEFAULT_HIKING_DIFFICULTY);
   }, []);
 
   const onTypeChange = (next: SessionType) => {
@@ -109,17 +132,33 @@ export default function AddSessionScreen() {
     if (!editingId) applyTypeDefaults(next);
   };
 
+  // Parsed numeric optionals (shared by the load preview and the save payload)
+  const caloriesNum = activeCalories.trim() !== '' ? Math.max(0, Math.round(parseFloat(activeCalories))) : undefined;
+  const milesNum = miles.trim() !== '' ? parseFloat(miles) : undefined;
+  const elevationNum = elevationGain.trim() !== '' ? Math.max(0, Math.round(parseFloat(elevationGain))) : undefined;
+  const packNum = packWeight.trim() !== '' ? Math.max(0, parseFloat(packWeight)) : undefined;
+
   // Live load preview
   const loadScore = useMemo(
-    () => calculateLoadScore({ type, subtype, durationMinutes: duration, intensity }),
-    [type, subtype, duration, intensity]
+    () => calculateLoadScore(
+      {
+        type, subtype, durationMinutes: duration, intensity,
+        activeCalories: caloriesNum,
+        miles: (type === 'Run' || type === 'Hiking') ? milesNum : undefined,
+        hikingDifficulty: type === 'Hiking' ? hikingDifficulty : undefined,
+        packWeightLbs: type === 'Hiking' ? packNum : undefined,
+        elevationGainFeet: type === 'Hiking' ? elevationNum : undefined,
+      },
+      settings.bodyWeightKg,
+    ),
+    [type, subtype, duration, intensity, caloriesNum, milesNum, hikingDifficulty, packNum, elevationNum, settings.bodyWeightKg]
   );
 
   const { startStr, endStr } = weekRange(parseDateString(date), settings.weekStartsOn);
   const weekSessionsExceptThis = allSessions.filter(
     (s) => isInRange(s.date, startStr, endStr) && s.id !== editingId
   );
-  const currentWeekly = calculateWeeklyLoad(weekSessionsExceptThis, settings.defaultWeeklyTargetLoad);
+  const currentWeekly = calculateWeeklyLoad(weekSessionsExceptThis, settings.defaultWeeklyTargetLoad, settings.bodyWeightKg);
   const newWeekly = calculateWeeklyLoad(
     [
       ...weekSessionsExceptThis,
@@ -130,12 +169,24 @@ export default function AddSessionScreen() {
         loadScore,
       } as Session,
     ],
-    settings.defaultWeeklyTargetLoad
+    settings.defaultWeeklyTargetLoad,
+    settings.bodyWeightKg,
   );
   const additionMsg = projectedMessage(currentWeekly.percentProjected, newWeekly.percentProjected);
 
   const subtypeOptions = TYPE_DEFAULTS[type].subtypes;
   const locationOptions = TYPE_DEFAULTS[type].locations ?? [];
+
+  // --- Activity-specific field visibility ---
+  const showRpe = ['BJJ', 'Lift', 'Run', 'Rock Climb', 'Hiking', 'Mobility / Recovery'].includes(type);
+  const showCalories = ['BJJ', 'Lift', 'Run', 'Rock Climb', 'Hiking'].includes(type);
+  const showDistance = type === 'Run' || type === 'Hiking';
+  const isHiking = type === 'Hiking';
+  // Pace (min/mi) shown for runs when both distance + duration are present.
+  const pace = type === 'Run' && milesNum && milesNum > 0
+    ? duration / milesNum
+    : undefined;
+  const hikingNeedsCaloriesEstimate = isHiking && caloriesNum === undefined;
 
   const onSave = async () => {
     const payload = {
@@ -149,7 +200,14 @@ export default function AddSessionScreen() {
       notes: notes.trim() || undefined,
       saunaMinutes: type === 'Sauna + Cold Plunge' ? saunaMin : undefined,
       coldPlungeMinutes: type === 'Sauna + Cold Plunge' ? plungeMin : undefined,
-      miles: type === 'Run' && miles.trim() !== '' ? parseFloat(miles) : undefined,
+      // Distance applies to both Run and Hiking.
+      miles: showDistance ? milesNum : undefined,
+      activeCalories: showCalories ? caloriesNum : undefined,
+      // Hiking-only context.
+      elevationGainFeet: isHiking ? elevationNum : undefined,
+      hikingDifficulty: isHiking ? hikingDifficulty : undefined,
+      packWeightLbs: isHiking ? packNum : undefined,
+      trailName: isHiking && trailName.trim() !== '' ? trailName.trim() : undefined,
       loadScore,
     };
 
@@ -159,8 +217,10 @@ export default function AddSessionScreen() {
 
     if (editingId) {
       await updateSession(editingId, payload);
+      toast.success('Session updated');
     } else {
       await addSession(payload);
+      toast.success(`${type} session saved`);
     }
     // Give the user ~700ms to enjoy the burst before navigating away
     setTimeout(() => {
@@ -175,7 +235,11 @@ export default function AddSessionScreen() {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
-        onPress: async () => { await deleteSession(editingId); nav.goBack(); },
+        onPress: async () => {
+          await deleteSession(editingId);
+          toast.info('Session deleted');
+          nav.goBack();
+        },
       },
     ]);
   };
@@ -289,22 +353,58 @@ export default function AddSessionScreen() {
             />
           )}
 
-          {/* Duration */}
-          <Text style={styles.label}>Duration · {duration} min</Text>
-          <View style={styles.stepRow}>
-            <StepBtn label="-15" onPress={() => setDuration((d) => Math.max(0, d - 15))} />
-            <StepBtn label="-5" onPress={() => setDuration((d) => Math.max(0, d - 5))} />
-            <View style={styles.durBubble}>
-              <Text style={styles.durValue}>{duration}</Text>
-              <Text style={styles.durUnit}>min</Text>
+          {/* Duration — dropdown (hours + minutes) for hikes, which span a wide
+              range; +/- stepper for everything else where it's quicker. */}
+          <Text style={styles.label}>
+            Duration · {formatDuration(duration)}
+          </Text>
+          {isHiking ? (
+            <DurationDropdown
+              valueMinutes={duration}
+              onChange={setDuration}
+              color={typeColors[type]}
+            />
+          ) : (
+            <View style={styles.stepRow}>
+              <StepBtn label="-15" onPress={() => setDuration((d) => Math.max(0, d - 15))} />
+              <StepBtn label="-5" onPress={() => setDuration((d) => Math.max(0, d - 5))} />
+              <View style={styles.durBubble}>
+                <Text style={styles.durValue}>{duration}</Text>
+                <Text style={styles.durUnit}>min</Text>
+              </View>
+              <StepBtn label="+5" onPress={() => setDuration((d) => d + 5)} />
+              <StepBtn label="+15" onPress={() => setDuration((d) => d + 15)} />
             </View>
-            <StepBtn label="+5" onPress={() => setDuration((d) => d + 5)} />
-            <StepBtn label="+15" onPress={() => setDuration((d) => d + 15)} />
-          </View>
+          )}
 
-          {/* Intensity */}
-          <Text style={styles.label}>Intensity · RPE {intensity}</Text>
-          {intensityRow}
+          {/* Intensity (RPE) — for activities where effort drives load */}
+          {showRpe && (
+            <>
+              <Text style={styles.label}>
+                Intensity · RPE {intensity}
+                {(type === 'Run' || type === 'Hiking') ? ' (used if no calories)' : ''}
+              </Text>
+              {intensityRow}
+            </>
+          )}
+
+          {/* Hiking difficulty */}
+          {isHiking && (
+            <>
+              <Text style={styles.label}>Difficulty</Text>
+              <View style={styles.chipRow}>
+                {HIKING_DIFFICULTIES.map((d) => (
+                  <Pill
+                    key={d}
+                    label={d}
+                    selected={hikingDifficulty === d}
+                    color={typeColors[type]}
+                    onPress={() => setHikingDifficulty(d)}
+                  />
+                ))}
+              </View>
+            </>
+          )}
 
           {/* Subtype */}
           {subtypeOptions.length > 0 && (
@@ -324,10 +424,12 @@ export default function AddSessionScreen() {
             </>
           )}
 
-          {/* Run miles */}
-          {type === 'Run' && (
+          {/* Distance (Run + Hiking) */}
+          {showDistance && (
             <>
-              <Text style={styles.label}>Miles</Text>
+              <Text style={styles.label}>
+                Distance · miles{pace ? `  ·  ${formatPace(pace)} /mi` : ''}
+              </Text>
               <TextInput
                 style={styles.textInput}
                 placeholder="Optional · e.g. 3.2"
@@ -335,6 +437,53 @@ export default function AddSessionScreen() {
                 keyboardType="decimal-pad"
                 value={miles}
                 onChangeText={setMiles}
+              />
+            </>
+          )}
+
+          {/* Hiking-specific context */}
+          {isHiking && (
+            <>
+              <Text style={styles.label}>Elevation gain · ft</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Optional · e.g. 1200"
+                placeholderTextColor={colors.textFaint}
+                keyboardType="number-pad"
+                value={elevationGain}
+                onChangeText={setElevationGain}
+              />
+              <Text style={styles.label}>Pack weight · lb</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Optional · 0 if none"
+                placeholderTextColor={colors.textFaint}
+                keyboardType="decimal-pad"
+                value={packWeight}
+                onChangeText={setPackWeight}
+              />
+              <Text style={styles.label}>Trail name</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Optional"
+                placeholderTextColor={colors.textFaint}
+                value={trailName}
+                onChangeText={setTrailName}
+              />
+            </>
+          )}
+
+          {/* Active calories (the preferred load base when known) */}
+          {showCalories && (
+            <>
+              <Text style={styles.label}>Active calories</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Optional · from your watch"
+                placeholderTextColor={colors.textFaint}
+                keyboardType="number-pad"
+                value={activeCalories}
+                onChangeText={setActiveCalories}
               />
             </>
           )}
@@ -411,6 +560,15 @@ export default function AddSessionScreen() {
           <Text style={[styles.previewMsg, { color: toneColor(additionMsg.tone) }]}>
             {additionMsg.label} · brings week to {Math.round(newWeekly.percentProjected)}% of target
           </Text>
+          {showCalories && (
+            <Text style={styles.previewNote}>
+              {caloriesNum !== undefined
+                ? 'Load from active calories × activity multiplier.'
+                : hikingNeedsCaloriesEstimate
+                  ? 'No calories entered — load is estimated from duration, difficulty, and body weight.'
+                  : 'No calories entered — load is estimated from duration, body weight, and intensity.'}
+            </Text>
+          )}
         </Card>
       </Section>
 
@@ -460,6 +618,25 @@ function toneColor(tone: 'light' | 'moderate' | 'heavy'): string {
   if (tone === 'light') return colors.success;
   if (tone === 'moderate') return colors.warn;
   return colors.danger;
+}
+
+/** Human-readable duration label, e.g. 75 → "1h 15m", 90 → "1h 30m", 45 → "45 min". */
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+/** Format a pace in decimal minutes-per-mile as M:SS. */
+function formatPace(minPerMile: number): string {
+  if (!isFinite(minPerMile) || minPerMile <= 0) return '—';
+  const mins = Math.floor(minPerMile);
+  const secs = Math.round((minPerMile - mins) * 60);
+  // Handle rounding 60s up to the next minute.
+  const m = secs === 60 ? mins + 1 : mins;
+  const s = secs === 60 ? 0 : secs;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({
@@ -523,6 +700,7 @@ const styles = StyleSheet.create({
   previewLabel: { color: colors.textDim, fontSize: fontSize.md },
   previewValue: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
   previewMsg: { marginTop: spacing.sm, fontSize: fontSize.sm, fontWeight: '700' },
+  previewNote: { marginTop: spacing.xs, fontSize: fontSize.xs, color: colors.textFaint, lineHeight: 15 },
 
   actions: { gap: spacing.sm, marginTop: spacing.md },
   saveWrap: { position: 'relative' },

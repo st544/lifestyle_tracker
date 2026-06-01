@@ -1,4 +1,4 @@
-import { SessionType } from './types';
+import { SessionType, HikingDifficulty } from './types';
 
 export interface TypeDefault {
   durationMinutes: number;
@@ -11,23 +11,37 @@ export const TYPE_DEFAULTS: Record<SessionType, TypeDefault> = {
   BJJ: {
     durationMinutes: 90,
     intensity: 7,
-    subtypes: ['Normal Class', 'Technique', 'Hard Sparring', 'Open Mat', 'Competition Class'],
+    subtypes: ['Normal class', 'Technique only', 'Hard sparring', 'Open mat', 'Competition class'],
     locations: ['Princeton BJJ', 'Logic', 'Other'],
   },
   Lift: {
     durationMinutes: 45,
     intensity: 6,
-    subtypes: ['Lift A', 'Lift B', 'Upper', 'Lower', 'Full Body', 'Kettlebell', 'Maintenance'],
+    subtypes: [
+      'Normal lift', 'Maintenance / easy', 'Heavy upper', 'Heavy lower',
+      'Heavy full body', 'Circuit / conditioning lift', 'Kettlebell',
+    ],
   },
   Run: {
     durationMinutes: 30,
     intensity: 5,
-    subtypes: ['Zone 2', 'Tempo', 'Intervals', 'Long Run'],
+    subtypes: [
+      'Easy / Zone 2', 'Long easy run', 'Tempo', 'Intervals', 'Race / time trial',
+      'Trail run', 'Hilly run', 'Downhill-heavy run',
+    ],
   },
   'Rock Climb': {
     durationMinutes: 90,
     intensity: 6,
-    subtypes: ['Bouldering', 'Top Rope', 'Lead', 'Casual'],
+    subtypes: ['Casual climbing', 'Top rope / moderate', 'Bouldering', 'Hard bouldering', 'Limit session'],
+  },
+  Hiking: {
+    durationMinutes: 120,
+    intensity: 5,
+    // Hiking uses `hikingDifficulty` (see HIKING_DIFFICULTIES) rather than a
+    // free-text subtype, so the subtype chip row is empty for hikes.
+    subtypes: [],
+    locations: ['Local trail', 'State park', 'Other'],
   },
   Sauna: {
     durationMinutes: 20,
@@ -56,12 +70,24 @@ export const TYPE_DEFAULTS: Record<SessionType, TypeDefault> = {
   },
 };
 
+/** Difficulty options shown for Hiking (drive the load multiplier). */
+export const HIKING_DIFFICULTIES: HikingDifficulty[] = [
+  'Easy / flat',
+  'Moderate',
+  'Hilly',
+  'Hard / steep',
+  'Very hard / mountain',
+];
+
+export const DEFAULT_HIKING_DIFFICULTY: HikingDifficulty = 'Moderate';
+
 // Quick-add buttons order
 export const QUICK_ADD_TYPES: SessionType[] = [
   'BJJ',
   'Lift',
   'Run',
   'Rock Climb',
+  'Hiking',
   'Mobility / Recovery',
   'Sauna',
   'Cold Plunge',
@@ -73,6 +99,7 @@ export const ALL_TYPES: SessionType[] = [
   'Lift',
   'Run',
   'Rock Climb',
+  'Hiking',
   'Sauna',
   'Cold Plunge',
   'Sauna + Cold Plunge',

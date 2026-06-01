@@ -5,19 +5,35 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, fontSize, radius, spacing } from '../theme';
 import { ReadinessBreakdown, readinessBand, TrendDirection } from '../readiness';
 import { WellnessRing } from './WellnessRing';
+import { LoadBar } from './LoadBar';
+import { TypewriterText } from './TypewriterText';
+import { AnimatedNumber } from './AnimatedNumber';
+import { getLoadZone } from '../load';
 import * as haptics from '../haptics';
 
 interface Props {
   readiness: ReadinessBreakdown;
   onPress?: () => void;
+
+  // --- Optional "Today's read" section (merged from the old smart-message card)
+  smartMessage?: string;
+  completedPercent?: number;
+  projectedPercent?: number;
 }
 
 /**
- * Front-page Training Readiness card. Big ring on the left, three component
- * lines on the right (HRV / Sleep / Load) with trend arrows and a verdict.
+ * Combined Today-screen card: readiness ring + component breakdown + verdict,
+ * plus an optional "Today's read" sub-section (smart message + big projected %
+ * + LoadBar). The two sections are split by a thin divider so the card reads
+ * as one composite "where am I right now" view instead of two stacked cards.
  */
-export function TrainingReadinessCard({ readiness, onPress }: Props) {
+export function TrainingReadinessCard({
+  readiness, onPress, smartMessage, completedPercent, projectedPercent,
+}: Props) {
   const band = readinessBand(readiness.score);
+  const hasReadSection =
+    smartMessage != null && completedPercent != null && projectedPercent != null;
+  const loadZone = projectedPercent != null ? getLoadZone(projectedPercent) : null;
 
   const Wrapper: any = onPress ? Pressable : View;
   const wrapperProps = onPress
@@ -73,6 +89,29 @@ export function TrainingReadinessCard({ readiness, onPress }: Props) {
         <Text style={[styles.verdict, { color: band.color }]}>
           {band.label.toUpperCase()} · {band.verdict}
         </Text>
+
+        {/* Merged "Today's read" section */}
+        {hasReadSection && loadZone && (
+          <>
+            <View style={styles.divider} />
+            <Text style={styles.readEyebrow}>TODAY'S READ</Text>
+            <TypewriterText text={smartMessage!} style={styles.smartText} speed={16} delay={200} />
+            <View style={styles.bigPctRow}>
+              <AnimatedNumber
+                value={projectedPercent!}
+                style={[styles.bigPct, { color: loadZone.color }]}
+                suffix="%"
+                duration={900}
+              />
+              <Text style={styles.bigPctSuffix}>of weekly load target</Text>
+            </View>
+            <View style={{ height: spacing.sm }} />
+            <LoadBar
+              completedPercent={completedPercent!}
+              projectedPercent={projectedPercent!}
+            />
+          </>
+        )}
       </LinearGradient>
     </Wrapper>
   );
@@ -139,4 +178,33 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.5,
   },
+
+  // --- Merged "Today's read" sub-section
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+  },
+  readEyebrow: {
+    color: colors.textDim,
+    fontSize: fontSize.xs,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginBottom: 4,
+  },
+  smartText: {
+    color: colors.text,
+    fontSize: fontSize.md,
+    lineHeight: 22,
+    minHeight: 44,
+  },
+  bigPctRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginTop: spacing.md,
+  },
+  bigPct: { fontSize: fontSize.xxl, fontWeight: '900', letterSpacing: -0.8 },
+  bigPctSuffix: { color: colors.textDim, fontSize: fontSize.sm, fontWeight: '600' },
 });

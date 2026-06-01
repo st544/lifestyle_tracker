@@ -24,8 +24,10 @@ export function DurationInput({ hours, onChange, variant = 'compact' }: Props) {
     const whole = Math.floor(h);
     const mins = Math.round((h - whole) * 60);
     // Handle overflow (e.g. 60 rounded minutes)
-    if (mins === 60) return { hStr: String(whole + 1), mStr: '0' };
-    return { hStr: String(whole), mStr: String(mins) };
+    if (mins === 60) return { hStr: String(whole + 1), mStr: '' };
+    // Leave the minutes field blank when there are no minutes — the "00"
+    // placeholder communicates the same thing without auto-filling a 0.
+    return { hStr: String(whole), mStr: mins === 0 ? '' : String(mins) };
   };
 
   const [hStr, setHStr] = useState<string>(() => decompose(hours).hStr);

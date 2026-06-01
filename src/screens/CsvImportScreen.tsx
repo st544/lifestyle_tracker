@@ -13,6 +13,7 @@ import { upsertDailyLog } from '../storage';
 import { parseCsv, ParseResult } from '../csv';
 import { Section, Card } from '../components/Section';
 import * as haptics from '../haptics';
+import { toast } from '../toast';
 import { RootStackParamList } from '../navigation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'CsvImport'>;
@@ -83,8 +84,10 @@ export default function CsvImportScreen() {
       catch { failed += 1; }
     }
     setImporting(false);
-    setStatus(`Imported ${written} entries${failed ? `, ${failed} failed` : ''}.`);
+    const summary = `Imported ${written} entries${failed ? `, ${failed} failed` : ''}.`;
+    setStatus(summary);
     haptics.success();
+    toast.success(summary);
   };
 
   const mappingLines: string[] = parsed ? [

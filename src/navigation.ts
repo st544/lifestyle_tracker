@@ -20,9 +20,12 @@ export type RootStackParamList = {
   DayDetail: { date: string };
   Backfill: undefined;
   Goals: undefined;
+  Settings: undefined;
   DailyLog: { date?: string } | undefined;
   StravaSetup: undefined;
   CsvImport: undefined;
   Wellness: undefined;
   Readiness: undefined;
+  Nutrition: { date?: string } | undefined;
+  RecipeBuilder: undefined;
 };

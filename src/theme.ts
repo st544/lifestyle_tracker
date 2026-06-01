@@ -52,8 +52,9 @@ export const rupeePalette = [
 export const typeColors: Record<SessionType, string> = {
   BJJ: '#FF6B3D',           // red/orange
   Lift: '#4F8CFF',           // blue
-  Run: '#34D399',            // green
+  Run: '#5DF87A',            // light neon green
   'Rock Climb': '#A78BFA',   // purple
+  Hiking: '#228B22',         // forest green (darker, distinct from Run)
   Sauna: '#F59E0B',          // amber
   'Cold Plunge': '#22D3EE',  // cyan
   'Sauna + Cold Plunge': '#F59E0B',
@@ -66,6 +67,7 @@ export const typeIcons: Record<SessionType, string> = {
   Lift: 'barbell',
   Run: 'walk',
   'Rock Climb': 'trail-sign',
+  Hiking: 'footsteps',
   Sauna: 'sunny',
   'Cold Plunge': 'snow',
   'Sauna + Cold Plunge': 'thermometer',

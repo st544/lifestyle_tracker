@@ -144,11 +144,11 @@ export function calculateWellness(
   return { score, hrv: h, sleep: s, load: l, hrvBaseline: baseline };
 }
 
-/** Color band for a wellness score (matches Zelda palette intuition). */
+/** Color band for a wellness score — neon palette (also used for calendar tint). */
 export function wellnessBand(score: number): { label: string; color: string } {
-  if (score >= 85) return { label: 'Primed',    color: '#34D399' };
-  if (score >= 70) return { label: 'Ready',     color: '#4F8CFF' };
-  if (score >= 55) return { label: 'Steady',    color: '#FFD23F' };
-  if (score >= 40) return { label: 'Drained',   color: '#F59E0B' };
-  return                 { label: 'Recover',   color: '#EF4444' };
+  if (score >= 85) return { label: 'Primed',    color: '#39FF6A' }; // neon green
+  if (score >= 70) return { label: 'Ready',     color: '#2FE6FF' }; // neon cyan
+  if (score >= 55) return { label: 'Steady',    color: '#FFE93D' }; // neon yellow
+  if (score >= 40) return { label: 'Drained',   color: '#FF9A2E' }; // neon orange
+  return                 { label: 'Recover',   color: '#FF2D6B' }; // neon pink-red
 }

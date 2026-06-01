@@ -16,6 +16,7 @@ import {
 import { syncStravaActivities } from '../api/strava-sync';
 import { Section, Card } from '../components/Section';
 import * as haptics from '../haptics';
+import { toast } from '../toast';
 import { RootStackParamList } from '../navigation';
 import { StravaTokens } from '../types';
 
@@ -104,9 +105,12 @@ export default function StravaSetupScreen() {
         `imported ${result.imported}, skipped ${result.skipped}` +
         (result.errored ? `, ${result.errored} errored` : ''),
       );
+      toast.success(`Connected · imported ${result.imported}`);
     } catch (err: any) {
       haptics.error();
-      setStatus(err?.message ?? 'Failed to exchange code');
+      const msg = err?.message ?? 'Failed to exchange code';
+      setStatus(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -117,14 +121,17 @@ export default function StravaSetupScreen() {
     setStatus('Syncing…');
     try {
       const result = await syncStravaActivities();
-      setStatus(
+      const summary =
         `Imported ${result.imported}, skipped ${result.skipped}` +
-        (result.errored ? `, ${result.errored} errored` : ''),
-      );
+        (result.errored ? `, ${result.errored} errored` : '');
+      setStatus(summary);
       haptics.success();
+      toast.success(summary);
     } catch (err: any) {
       haptics.error();
-      setStatus(err?.message ?? 'Sync failed');
+      const msg = err?.message ?? 'Sync failed';
+      setStatus(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -142,6 +149,7 @@ export default function StravaSetupScreen() {
             setTokens(undefined);
             setStatus('Disconnected.');
             haptics.success();
+            toast.info('Strava disconnected');
           },
         },
       ],
