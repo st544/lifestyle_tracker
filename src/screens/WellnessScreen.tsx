@@ -111,10 +111,10 @@ export default function WellnessScreen() {
 
   // Hero shows the MOST RECENT day's wellness score, not the 7-day average.
   // Walk backward through the series and take the first non-null score.
-  const mostRecentWellness =
-    [...dailySeries].reverse().find((d) => d.wellness != null)?.wellness ?? 0;
-  const summaryScore = mostRecentWellness;
-  const summaryBand = wellnessBand(summaryScore);
+  const summaryScore: number | null =
+    [...dailySeries].reverse().find((d) => d.wellness != null)?.wellness ?? null;
+  const summaryBand =
+    summaryScore != null ? wellnessBand(summaryScore) : { color: colors.textFaint, label: 'No data' };
 
   const toneColor = toneToColor(insight.tone);
   const toneIcon = toneToIcon(insight.tone);

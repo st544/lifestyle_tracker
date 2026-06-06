@@ -80,6 +80,8 @@ export default function CalendarScreen() {
         log.date, log, dailyLogs, sessions,
         settings.defaultWeeklyTargetLoad, settings.weekStartsOn,
       );
+      // Only tint days that actually have a recovery-backed wellness score.
+      if (w.score == null) continue;
       map[log.date] = wellnessBand(w.score).color;
     }
     return map;

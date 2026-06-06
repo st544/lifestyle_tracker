@@ -110,13 +110,18 @@ export default function DayDetailScreen() {
     dailyLog?.sleepQuality != null ||
     Object.values(dailyLog?.supplements ?? {}).some(Boolean);
 
-  const band = wellnessBand(wellness.score);
+  const wellnessSubtitle =
+    wellness.score != null
+      ? `Wellness ${wellness.score}/100 · ${wellnessBand(wellness.score).label}`
+      : hasAnyWellness
+        ? 'Add HRV or sleep for a wellness score'
+        : 'Enter HRV, sleep, supplements';
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Section
         title="Daily log"
-        subtitle={hasAnyWellness ? `Wellness ${wellness.score}/100 · ${band.label}` : 'Enter HRV, sleep, supplements'}
+        subtitle={wellnessSubtitle}
         right={
           <Pressable
             onPress={() => nav.navigate('DailyLog', { date })}

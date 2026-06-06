@@ -126,7 +126,7 @@ export default function TrendsScreen() {
           log.date, log, dailyLogs, sessions,
           settings.defaultWeeklyTargetLoad, settings.weekStartsOn,
         ).score;
-        if (score > 0) wellnessScores.push(score);
+        if (score != null && score > 0) wellnessScores.push(score);
       }
 
       return {

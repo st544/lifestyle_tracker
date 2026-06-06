@@ -16,7 +16,10 @@ import { subDays } from 'date-fns';
  */
 
 export interface WellnessBreakdown {
-  score: number;            // 0-100 (or null if no inputs at all)
+  // 0-100, or null when there's no recovery data (no HRV AND no sleep) — in
+  // that case we deliberately do NOT fall back to a load-only score, since
+  // "wellness" with no recovery signal isn't meaningful.
+  score: number | null;
   hrv: number | null;       // 0-100
   sleep: number | null;     // 0-100
   load: number | null;      // 0-100
@@ -126,6 +129,13 @@ export function calculateWellness(
   const weekly = calculateWeeklyLoad(weekSessions, weeklyTarget);
   const l = loadBalanceScore(weekly.percentProjected);
 
+  // Require at least one recovery signal (HRV or sleep). Without one, we don't
+  // emit a score at all — load balance alone isn't "wellness", and on planned
+  // future days it would otherwise read as a misleadingly high number.
+  if (h == null && s == null) {
+    return { score: null, hrv: h, sleep: s, load: l, hrvBaseline: baseline };
+  }
+
   // Weighted average with renormalization for missing components
   const weights = [
     { v: h, w: 0.4 },
@@ -139,7 +149,7 @@ export function calculateWellness(
     weightSum += c.w;
     scoreSum += c.v * c.w;
   }
-  const score = weightSum > 0 ? Math.round(scoreSum / weightSum) : 0;
+  const score = weightSum > 0 ? Math.round(scoreSum / weightSum) : null;
 
   return { score, hrv: h, sleep: s, load: l, hrvBaseline: baseline };
 }

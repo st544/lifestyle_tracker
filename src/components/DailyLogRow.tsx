@@ -10,7 +10,7 @@ import * as haptics from '../haptics';
 
 interface Props {
   log: DailyLog | undefined;
-  wellness: number;
+  wellness: number | null;
   onChange: (patch: Partial<DailyLog>) => Promise<void> | void;
   onOpenFull?: () => void;
   onOpenWellness?: () => void;

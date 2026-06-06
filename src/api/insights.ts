@@ -80,7 +80,7 @@ function buildContext({ sessions, dailyLogs, settings, today }: BuildContextArgs
       if (typeof log.sleepHours === 'number')    bits.push(`sleep ${log.sleepHours}h`);
       if (typeof log.sleepQuality === 'number')  bits.push(`q${log.sleepQuality}/100`);
       bits.push(`supps:${supplements}`);
-      bits.push(`wellness ${wellness.score}/100`);
+      if (wellness.score != null) bits.push(`wellness ${wellness.score}/100`);
       parts.push(`  daily: ${bits.join(' · ')}`);
     }
     for (const s of daysSessions) {

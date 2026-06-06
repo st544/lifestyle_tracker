@@ -11,7 +11,7 @@ import { AnimatedNumber } from './AnimatedNumber';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 interface Props {
-  score: number;          // 0-100
+  score: number | null;   // 0-100, or null = no recovery data logged
   size?: number;
   stroke?: number;
   /** Sub-label below the number. */
@@ -20,16 +20,17 @@ interface Props {
 
 /**
  * Circular gauge for the composite wellness score. Animated draw on mount /
- * value change; color comes from the wellness band.
+ * value change; color comes from the wellness band. When `score` is null
+ * (no HRV/sleep logged) it shows a muted "—" no-data state.
  */
 export function WellnessRing({ score, size = 110, stroke = 10, caption }: Props) {
   const r = size / 2 - stroke / 2;
   const circumference = 2 * Math.PI * r;
-  const band = wellnessBand(score);
+  const band = score != null ? wellnessBand(score) : { label: 'No data', color: colors.textFaint };
 
   const progress = useSharedValue(0);
   useEffect(() => {
-    progress.value = withTiming(score / 100, { duration: 900, easing: Easing.out(Easing.cubic) });
+    progress.value = withTiming(score != null ? score / 100 : 0, { duration: 900, easing: Easing.out(Easing.cubic) });
   }, [score, progress]);
 
   const ringProps = useAnimatedProps(() => ({
@@ -54,11 +55,15 @@ export function WellnessRing({ score, size = 110, stroke = 10, caption }: Props)
         />
       </Svg>
       <View style={styles.centerOverlay}>
-        <AnimatedNumber
-          value={score}
-          duration={900}
-          style={[styles.value, { color: band.color }]}
-        />
+        {score != null ? (
+          <AnimatedNumber
+            value={score}
+            duration={900}
+            style={[styles.value, { color: band.color }]}
+          />
+        ) : (
+          <Text style={[styles.value, { color: band.color }]}>—</Text>
+        )}
         <Text style={styles.band}>{band.label.toUpperCase()}</Text>
         {caption ? <Text style={styles.caption}>{caption}</Text> : null}
       </View>

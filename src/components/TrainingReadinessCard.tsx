@@ -23,7 +23,7 @@ interface Props {
 
 /**
  * Combined Today-screen card: readiness ring + component breakdown + verdict,
- * plus an optional "Today's read" sub-section (smart message + big projected %
+ * plus an optional "Today's read" sub-section (smart message + big COMPLETED %
  * + LoadBar). The two sections are split by a thin divider so the card reads
  * as one composite "where am I right now" view instead of two stacked cards.
  */
@@ -33,7 +33,9 @@ export function TrainingReadinessCard({
   const band = readinessBand(readiness.score);
   const hasReadSection =
     smartMessage != null && completedPercent != null && projectedPercent != null;
-  const loadZone = projectedPercent != null ? getLoadZone(projectedPercent) : null;
+  // Today's read reflects COMPLETED load — the number on the bar and its color
+  // both come from the completed percentage, not the projected total.
+  const loadZone = completedPercent != null ? getLoadZone(completedPercent) : null;
 
   const Wrapper: any = onPress ? Pressable : View;
   const wrapperProps = onPress
@@ -98,12 +100,12 @@ export function TrainingReadinessCard({
             <TypewriterText text={smartMessage!} style={styles.smartText} speed={16} delay={200} />
             <View style={styles.bigPctRow}>
               <AnimatedNumber
-                value={projectedPercent!}
+                value={completedPercent!}
                 style={[styles.bigPct, { color: loadZone.color }]}
                 suffix="%"
                 duration={900}
               />
-              <Text style={styles.bigPctSuffix}>of weekly load target</Text>
+              <Text style={styles.bigPctSuffix}>of weekly target completed</Text>
             </View>
             <View style={{ height: spacing.sm }} />
             <LoadBar

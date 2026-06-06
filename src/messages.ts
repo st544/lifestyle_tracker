@@ -7,7 +7,9 @@ export function generateSmartMessage(
   weekly: WeeklyLoad,
   allSessions: Session[]
 ): string {
-  const pct = weekly.percentProjected;
+  // Based on COMPLETED load (what you've actually done this week), not the
+  // projected total that includes planned sessions.
+  const pct = weekly.percentCompleted;
   const zone = getLoadZone(pct);
 
   // Two-day streak of hard training
