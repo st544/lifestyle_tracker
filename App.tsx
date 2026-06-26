@@ -20,6 +20,8 @@ import GoalsScreen from './src/screens/GoalsScreen';
 import DailyLogScreen from './src/screens/DailyLogScreen';
 import StravaSetupScreen from './src/screens/StravaSetupScreen';
 import CsvImportScreen from './src/screens/CsvImportScreen';
+import JsonImportScreen from './src/screens/JsonImportScreen';
+import HealthConnectSetupScreen from './src/screens/HealthConnectSetupScreen';
 import WellnessScreen from './src/screens/WellnessScreen';
 import ReadinessScreen from './src/screens/ReadinessScreen';
 import NutritionScreen from './src/screens/NutritionScreen';
@@ -76,8 +78,13 @@ function TabsNavigator() {
           overflow: 'visible',
         },
         tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textDim,
-        tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
+        tabBarInactiveTintColor: colors.textFaint,
+        tabBarLabelStyle: {
+          fontWeight: '700',
+          fontSize: 10,
+          letterSpacing: 0.3,
+          marginTop: 2,
+        },
         tabBarIcon: ({ color, size, focused }) => (
           <AnimatedTabIcon
             name={ICON_MAP[route.name]}
@@ -133,6 +140,8 @@ export default function App() {
             <Root.Screen name="DailyLog" component={DailyLogScreen} options={{ title: 'Daily Log', presentation: 'modal' }} />
             <Root.Screen name="StravaSetup" component={StravaSetupScreen} options={{ title: 'Strava', presentation: 'modal' }} />
             <Root.Screen name="CsvImport" component={CsvImportScreen} options={{ title: 'Import CSV', presentation: 'modal' }} />
+            <Root.Screen name="JsonImport" component={JsonImportScreen} options={{ title: 'Restore JSON', presentation: 'modal' }} />
+            <Root.Screen name="HealthConnect" component={HealthConnectSetupScreen} options={{ title: 'Health Connect', presentation: 'modal' }} />
             <Root.Screen name="Wellness" component={WellnessScreen} options={{ title: 'Wellness', presentation: 'modal' }} />
             <Root.Screen name="Readiness" component={ReadinessScreen} options={{ title: 'Training Readiness', presentation: 'modal' }} />
             <Root.Screen name="Nutrition" component={NutritionScreen} options={{ title: 'Nutrition', presentation: 'modal' }} />

@@ -35,7 +35,7 @@
 import { Session, DailyLog } from './types';
 import { parseDateString, toDateString } from './dates';
 import { subDays } from 'date-fns';
-import { rollingHrvBaseline } from './wellness';
+import { rollingHrvBaseline } from './hrv';
 
 export type LoadFormBand =
   | 'unknown' | 'fresh' | 'optimal' | 'high' | 'overreach' | 'spike';

@@ -1,7 +1,7 @@
 import { DailyLog, Session } from './types';
-import { calculateWeeklyLoad } from './load';
-import { weekRange, isInRange, toDateString, parseDateString } from './dates';
-import { subDays } from 'date-fns';
+import { calculateLoadForm } from './load-form';
+import { parseDateString } from './dates';
+import { rollingHrvBaseline } from './hrv';
 
 /**
  * Composite wellness score (0-100) blending HRV, sleep, and training-load balance.
@@ -27,19 +27,22 @@ export interface WellnessBreakdown {
   notes?: string;
 }
 
-const SLEEP_OPTIMAL_LOW  = 7;
-const SLEEP_OPTIMAL_HIGH = 9;
-
-/** Hours-of-sleep component (0-100). Optimal band 7-9h; drops smoothly outside. */
+/**
+ * Hours-of-sleep component (0-100). Full 100 ONLY in the ideal 8–9h window.
+ * 7→8h ramps up to it; under 7h is penalized; over 9h is mildly penalized.
+ *   <7h → penalized (7→85, 6→63, 5→41, 4→19, ≤3.1→0)
+ *   7–8h → ramps 85 → 100
+ *   8–9h → 100
+ *   ≥9h → mild over-sleep penalty (9→95, 10→80, capped ≥50)
+ */
 function sleepHoursScore(hours?: number): number | null {
   if (hours == null) return null;
-  if (hours >= SLEEP_OPTIMAL_LOW && hours <= SLEEP_OPTIMAL_HIGH) return 100;
-  if (hours < SLEEP_OPTIMAL_LOW) {
-    // 4h → 30, 5h → 50, 6h → 75, 7h → 100
-    return Math.max(0, 100 - (SLEEP_OPTIMAL_LOW - hours) * 25);
+  if (hours > 8 && hours < 9) return 100;                          // ideal window
+  if (hours >= 7) {
+    if (hours <= 8) return Math.round(85 + (hours - 7) * 15);      // 7→85 … 8→100
+    return Math.max(50, Math.round(95 - (hours - 9) * 15));        // ≥9h over-sleep
   }
-  // 10h → 90, 11h → 75, 12h → 55 — over-sleep is mildly penalized
-  return Math.max(0, 100 - (hours - SLEEP_OPTIMAL_HIGH) * 15);
+  return Math.max(0, Math.round(85 - (7 - hours) * 22));           // <7h penalty
 }
 
 /** Sleep quality component (1-100 → 0-100, identity-clamped). */
@@ -78,33 +81,26 @@ function hrvScore(hrv: number | undefined, baseline: number | undefined): number
 }
 
 /**
- * Load-balance score. Both undertraining and overreaching reduce wellness.
- * Sweet spot: 60-90% of weekly target.
+ * Load-balance component derived from the **ACWR** (acute:chronic workload
+ * ratio) — a more physiologically realistic "am I in a productive load zone"
+ * signal than raw % of weekly target. The optimal ACWR band (0.8–1.3) scores
+ * 100; being fresh/detrained is mildly reduced; overreaching/spiking is
+ * penalized progressively. Returns null when there's no chronic baseline yet
+ * (so the component drops out and wellness uses HRV + sleep only).
+ *
+ *   ratio  < 0.8        Fresh        → 75 … 100   (recovered, slightly under)
+ *   ratio  0.8 – 1.3    Optimal      → 100        (productive sweet spot)
+ *   ratio  1.3 – 1.5    High         → 100 … 80
+ *   ratio  1.5 – 2.0    Overreaching → 80 … 40
+ *   ratio  > 2.0        Spike        → ≤ 40 (floored at 10)
  */
-function loadBalanceScore(weeklyPercent: number): number {
-  if (weeklyPercent <= 0) return 50; // unknown / pure rest
-  if (weeklyPercent >= 60 && weeklyPercent <= 90) return 100;
-  if (weeklyPercent < 60) {
-    // 0% → 60, 60% → 100  (linear)
-    return 60 + (weeklyPercent / 60) * 40;
-  }
-  if (weeklyPercent <= 110) {
-    // 90 → 100, 110 → 75
-    return 100 - ((weeklyPercent - 90) / 20) * 25;
-  }
-  // 110 → 75, 140 → 35, 170+ → ~5
-  return Math.max(5, 75 - (weeklyPercent - 110) * 1.5);
-}
-
-/** Mean of the last N days' HRV values from the daily logs (excluding today). */
-export function rollingHrvBaseline(logs: DailyLog[], today: string, days = 14): number | undefined {
-  const cutoff = toDateString(subDays(parseDateString(today), days));
-  const inWindow = logs
-    .filter((l) => l.date < today && l.date >= cutoff && typeof l.hrv === 'number' && (l.hrv as number) > 0)
-    .map((l) => l.hrv as number);
-  if (inWindow.length === 0) return undefined;
-  const sum = inWindow.reduce((a, b) => a + b, 0);
-  return sum / inWindow.length;
+function loadBalanceFromAcwr(ratio: number, hasBaseline: boolean): number | null {
+  if (!hasBaseline || ratio <= 0) return null;
+  if (ratio >= 0.8 && ratio <= 1.3) return 100;
+  if (ratio < 0.8)  return Math.round(75 + (ratio / 0.8) * 25);
+  if (ratio <= 1.5) return Math.round(100 - ((ratio - 1.3) / 0.2) * 20);
+  if (ratio <= 2.0) return Math.round(80 - ((ratio - 1.5) / 0.5) * 40);
+  return Math.max(10, Math.round(40 - (ratio - 2.0) * 30));
 }
 
 /**
@@ -123,11 +119,12 @@ export function calculateWellness(
   const h = hrvScore(daily?.hrv, baseline);
   const s = sleepScore(daily?.sleepHours, daily?.sleepQuality);
 
-  // Load uses the week containing `date` (projected — completed + planned)
-  const { startStr, endStr } = weekRange(parseDateString(date), weekStartsOn);
-  const weekSessions = allSessions.filter((x) => isInRange(x.date, startStr, endStr));
-  const weekly = calculateWeeklyLoad(weekSessions, weeklyTarget);
-  const l = loadBalanceScore(weekly.percentProjected);
+  // Load balance from the ACWR as of `date` (acute 7d : chronic 28d), the same
+  // ratio shown on the This Week tab. Recovery-adjusted ratio when available.
+  const form = calculateLoadForm(allSessions, allDailyLogs, parseDateString(date));
+  const hasBaseline = form.band !== 'unknown' && form.chronicLoad > 0;
+  const acwr = form.adjustedRatio > 0 ? form.adjustedRatio : form.ratio;
+  const l = loadBalanceFromAcwr(acwr, hasBaseline);
 
   // Require at least one recovery signal (HRV or sleep). Without one, we don't
   // emit a score at all — load balance alone isn't "wellness", and on planned

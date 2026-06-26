@@ -362,7 +362,7 @@ export default function TrendsScreen() {
 
       <Section title="By activity" style={{ marginTop: spacing.lg }}>
         <View style={{ gap: spacing.md }}>
-          {(['BJJ', 'Lift', 'Run', 'Rock Climb'] as SessionType[]).map((t) => (
+          {(['BJJ', 'Lift'] as SessionType[]).map((t) => (
             <BarChart
               key={t}
               title={t}

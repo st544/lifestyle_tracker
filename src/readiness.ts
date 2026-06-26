@@ -15,7 +15,7 @@
  */
 
 import { DailyLog, Session } from './types';
-import { rollingHrvBaseline } from './wellness';
+import { rollingHrvBaseline } from './hrv';
 import { calculateWeeklyLoad } from './load';
 import {
   weekRange, isInRange, parseDateString, toDateString,

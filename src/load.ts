@@ -113,13 +113,25 @@ function liftMetAndMultiplier(subtype?: string): [number, number] {
   }
 }
 
-/** Lifting multiplier adjustment from RPE (0 = unset → no adjustment). */
+/**
+ * Lifting multiplier adjustment from RPE — a distinct value per RPE point
+ * (monotonic), so RPE 7≠8 and 9≠10. 6 is neutral; harder sessions add more.
+ * (0 = unset → no adjustment.)
+ */
 function liftRpeAdjustment(rpe: number): number {
-  if (rpe >= 9) return 0.10;   // 9-10
-  if (rpe >= 7) return 0.05;   // 7-8
-  if (rpe >= 5) return 0.00;   // 5-6
-  if (rpe >= 1) return -0.10;  // 1-4
-  return 0;                    // unset
+  switch (Math.round(rpe)) {
+    case 10: return 0.16;
+    case 9:  return 0.12;
+    case 8:  return 0.08;
+    case 7:  return 0.05;
+    case 6:  return 0.00;
+    case 5:  return -0.02;
+    case 4:  return -0.05;
+    case 3:  return -0.08;
+    case 2:  return -0.10;
+    case 1:  return -0.12;
+    default: return 0; // unset / 0
+  }
 }
 
 /** Rock Climb: [session-adjusted MET, stressMultiplier] by subtype. */

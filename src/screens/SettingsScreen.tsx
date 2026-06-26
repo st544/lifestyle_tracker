@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -155,6 +155,15 @@ export default function SettingsScreen() {
         </Pressable>
       </Section>
 
+      {Platform.OS === 'android' && (
+        <Section title="Health Connect (Android)" subtitle="Sync Garmin → Health Connect → app: HRV, sleep, exercise, calories, resting HR.">
+          <Pressable style={styles.hcBtn} onPress={() => nav.navigate('HealthConnect')}>
+            <Ionicons name="fitness-outline" size={16} color="#0B0F14" />
+            <Text style={styles.darkBtnText}>Configure Health Connect</Text>
+          </Pressable>
+        </Section>
+      )}
+
       <Section title="Import HRV / sleep CSV" subtitle="Backfill from Garmin Connect, Whoop, Oura, or a hand-rolled spreadsheet.">
         <Pressable style={styles.csvBtn} onPress={() => nav.navigate('CsvImport')}>
           <Ionicons name="cloud-upload-outline" size={16} color="#0B0F14" />
@@ -166,6 +175,13 @@ export default function SettingsScreen() {
         <Pressable style={styles.exportBtn} onPress={exportData}>
           <Ionicons name="download-outline" size={16} color="#0B0F14" />
           <Text style={styles.darkBtnText}>Export all data as JSON</Text>
+        </Pressable>
+      </Section>
+
+      <Section title="Restore data" subtitle="Import a JSON export from another install (e.g. your old Expo Go app).">
+        <Pressable style={styles.restoreBtn} onPress={() => nav.navigate('JsonImport')}>
+          <Ionicons name="cloud-download-outline" size={16} color="#0B0F14" />
+          <Text style={styles.darkBtnText}>Restore from JSON</Text>
         </Pressable>
       </Section>
 
@@ -251,6 +267,14 @@ const styles = StyleSheet.create({
   exportBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     backgroundColor: '#34D399', paddingVertical: 14, borderRadius: radius.pill,
+  },
+  hcBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#34D399', paddingVertical: 14, borderRadius: radius.pill,
+  },
+  restoreBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#A78BFA', paddingVertical: 14, borderRadius: radius.pill,
   },
   darkBtnText: { color: '#0B0F14', fontWeight: '800', fontSize: fontSize.md },
   apiKeyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

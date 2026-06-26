@@ -16,6 +16,7 @@ import { SessionCard } from '../components/SessionCard';
 import { Section, Card } from '../components/Section';
 import { QuickAddBar } from '../components/QuickAddBar';
 import { DailyLogRow } from '../components/DailyLogRow';
+import { PlannedSessionModal } from '../components/PlannedSessionModal';
 import * as haptics from '../haptics';
 import { toast } from '../toast';
 import { RootStackParamList } from '../navigation';
@@ -32,6 +33,7 @@ export default function DayDetailScreen() {
   const [allDailyLogs, setAllDailyLogs] = useState<DailyLog[]>([]);
   const [allSessions, setAllSessions] = useState<Session[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [actionSession, setActionSession] = useState<Session | null>(null);
 
   const load = useCallback(async () => {
     const [s, log, logs, allS, st] = await Promise.all([
@@ -73,18 +75,7 @@ export default function DayDetailScreen() {
 
   const onSessionPress = (s: Session) => {
     if (s.status === 'Planned') {
-      Alert.alert(
-        s.type,
-        s.subtype ?? '',
-        [
-          { text: 'Mark Completed', onPress: async () => { await updateSession(s.id, { status: 'Completed' }); toast.success('Marked completed'); load(); } },
-          { text: 'Edit / Duration', onPress: () => nav.navigate('AddSession', { sessionId: s.id }) },
-          { text: 'Skip', onPress: async () => { await updateSession(s.id, { status: 'Skipped' }); toast.info('Skipped'); load(); } },
-          { text: 'Move', onPress: () => nav.navigate('AddSession', { sessionId: s.id }) },
-          { text: 'Delete', style: 'destructive', onPress: () => onDelete(s.id) },
-          { text: 'Cancel', style: 'cancel' },
-        ],
-      );
+      setActionSession(s);
     } else {
       nav.navigate('AddSession', { sessionId: s.id });
     }
@@ -182,6 +173,30 @@ export default function DayDetailScreen() {
       )}
 
       <View style={{ height: spacing.xxl }} />
+
+      {actionSession && (
+        <PlannedSessionModal
+          session={actionSession}
+          allSessions={allSessions}
+          settings={settings}
+          onClose={() => setActionSession(null)}
+          onCompleted={async () => {
+            await updateSession(actionSession.id, { status: 'Completed' });
+            toast.success('Marked completed');
+            setActionSession(null);
+            load();
+          }}
+          onEdit={() => { const id = actionSession.id; setActionSession(null); nav.navigate('AddSession', { sessionId: id }); }}
+          onMove={() => { const id = actionSession.id; setActionSession(null); nav.navigate('AddSession', { sessionId: id }); }}
+          onSkip={async () => {
+            await updateSession(actionSession.id, { status: 'Skipped' });
+            toast.info('Skipped');
+            setActionSession(null);
+            load();
+          }}
+          onDelete={() => { const id = actionSession.id; setActionSession(null); onDelete(id); }}
+        />
+      )}
     </ScrollView>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, RefreshControl, Pressable, LayoutChangeEvent,
+  View, Text, StyleSheet, RefreshControl, Pressable, LayoutChangeEvent, Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -32,6 +32,7 @@ import { calculateWellness } from '../wellness';
 import { calculateReadiness } from '../readiness';
 import { generateDailyInsight } from '../api/insights';
 import { syncStravaActivities } from '../api/strava-sync';
+import { syncHealthConnect } from '../api/health-connect-sync';
 import { addDays } from 'date-fns';
 import { toDateString } from '../dates';
 import { QuickAddBar } from '../components/QuickAddBar';
@@ -102,9 +103,29 @@ export default function TodayScreen() {
       console.warn('Strava sync failed:', err);
     }
 
-    const [s, st, logs, food] = await Promise.all([
+    const [s0, st, logs0, food] = await Promise.all([
       getSessions(), getSettings(), getDailyLogs(), getFoodEntriesForDate(todayString()),
     ]);
+
+    // Best-effort Health Connect sync (Android + opted-in). No-ops otherwise.
+    // Re-fetch sessions/logs afterward so freshly-imported records render now.
+    let s = s0;
+    let logs = logs0;
+    if (Platform.OS === 'android' && st.healthConnectEnabled) {
+      try {
+        const hc = await syncHealthConnect();
+        if (hc.importedSessions > 0 || hc.importedDailyLogs > 0) {
+          toast.success(
+            `Health Connect: ${hc.importedSessions} session${hc.importedSessions === 1 ? '' : 's'}` +
+            `, ${hc.importedDailyLogs} daily log${hc.importedDailyLogs === 1 ? '' : 's'}`,
+          );
+          [s, logs] = await Promise.all([getSessions(), getDailyLogs()]);
+        }
+      } catch (err) {
+        console.warn('Health Connect sync failed:', err);
+      }
+    }
+
     setSessions(s);
     setSettings(st);
     setDailyLogs(logs);
@@ -500,10 +521,10 @@ const styles = StyleSheet.create({
   container: { padding: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },
   heroRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: spacing.sm,
-    marginBottom: spacing.sm,
+    marginBottom: -spacing.xs,
   },
   heroLeft: { flex: 1 },
   heroControls: {
@@ -512,7 +533,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   heroDate: {},
-  sword: { marginTop: 6, width: '100%' },
+  sword: { marginTop: 2, width: '100%' },
   heroIndicators: {
     flexDirection: 'row',
     alignItems: 'center',

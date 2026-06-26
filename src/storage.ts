@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Session, SessionInput, Template, Settings, DEFAULT_SETTINGS,
   DailyLog, WeeklyChecklist, DailyInsight,
-  StravaTokens, StravaSyncState,
+  StravaTokens, StravaSyncState, HealthConnectSyncState,
   FoodEntry, Recipe,
 } from './types';
 import { calculateLoadScore, calculateWeeklyLoad, WeeklyLoad } from './load';
@@ -17,6 +17,7 @@ const KEYS = {
   dailyInsights: 'training_daily_insights',
   stravaTokens: 'training_strava_tokens',
   stravaSyncState: 'training_strava_sync_state',
+  healthConnectSyncState: 'training_health_connect_sync_state',
   // last-seen snapshots used to detect when we've crossed a milestone
   // since the user last opened a particular screen
   lastSeenStreaks: 'training_last_seen_streaks',
@@ -359,6 +360,29 @@ export async function saveStravaSyncState(s: StravaSyncState): Promise<void> {
   await AsyncStorage.setItem(KEYS.stravaSyncState, JSON.stringify(trimmed));
 }
 
+// --- Health Connect sync state (mirror the Strava helpers) -------------
+
+export async function getHealthConnectSyncState(): Promise<HealthConnectSyncState> {
+  const raw = await AsyncStorage.getItem(KEYS.healthConnectSyncState);
+  if (!raw) return { syncedRecordIds: [], lastSyncedAt: 0 };
+  try {
+    const parsed = JSON.parse(raw) as HealthConnectSyncState;
+    return {
+      syncedRecordIds: Array.isArray(parsed.syncedRecordIds) ? parsed.syncedRecordIds : [],
+      lastSyncedAt: typeof parsed.lastSyncedAt === 'number' ? parsed.lastSyncedAt : 0,
+    };
+  } catch { return { syncedRecordIds: [], lastSyncedAt: 0 }; }
+}
+
+export async function saveHealthConnectSyncState(s: HealthConnectSyncState): Promise<void> {
+  // Cap synced record IDs at 5000 to bound storage growth, like Strava.
+  const trimmed: HealthConnectSyncState = {
+    syncedRecordIds: s.syncedRecordIds.slice(-5000),
+    lastSyncedAt: s.lastSyncedAt,
+  };
+  await AsyncStorage.setItem(KEYS.healthConnectSyncState, JSON.stringify(trimmed));
+}
+
 // --- Nutrition: food entries + recipes ---------------------------------
 
 export async function getFoodEntries(): Promise<FoodEntry[]> {
@@ -470,6 +494,89 @@ export async function exportAllAsJson(): Promise<string> {
     },
   };
   return JSON.stringify(payload, null, 2);
+}
+
+export interface ImportResult {
+  sessions: number;
+  dailyLogs: number;
+  templates: number;
+  foodEntries: number;
+  recipes: number;
+  weeklyChecklists: number;
+  dailyInsights: number;
+}
+
+/**
+ * Restore a JSON dump produced by `exportAllAsJson` (e.g. from the old Expo Go
+ * install) into this install. Non-destructive union: imported records win on
+ * id/date collisions, existing records are kept otherwise. Settings merge with
+ * the imported values overlaid on existing — locally-entered API keys survive
+ * because the export strips them (they're simply absent from the payload).
+ */
+export async function importAllFromJson(json: string): Promise<ImportResult> {
+  let data: any;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    throw new Error('Not valid JSON.');
+  }
+  if (!data || typeof data !== 'object') throw new Error('Unexpected JSON shape.');
+
+  const mergeById = <T extends { id: string }>(existing: T[], incoming: unknown): T[] => {
+    if (!Array.isArray(incoming)) return existing;
+    const map = new Map<string, T>();
+    for (const e of existing) map.set(e.id, e);
+    for (const r of incoming as T[]) if (r && r.id) map.set(r.id, r);
+    return Array.from(map.values());
+  };
+  const mergeByKey = <T>(existing: T[], incoming: unknown, key: (t: T) => string): T[] => {
+    if (!Array.isArray(incoming)) return existing;
+    const map = new Map<string, T>();
+    for (const e of existing) map.set(key(e), e);
+    for (const r of incoming as T[]) if (r) map.set(key(r), r);
+    return Array.from(map.values());
+  };
+
+  const [
+    curSessions, curTemplates, curLogs, curChecklists, curInsights, curSettings,
+    curFood, curRecipes,
+  ] = await Promise.all([
+    getSessions(), getTemplates(), getDailyLogs(), getWeeklyChecklists(),
+    getDailyInsights(), getSettings(), getFoodEntries(), getRecipes(),
+  ]);
+
+  const nextSessions = mergeById(curSessions, data.sessions);
+  const nextTemplates = mergeById(curTemplates, data.templates);
+  const nextFood = mergeById(curFood, data.foodEntries);
+  const nextRecipes = mergeById(curRecipes, data.recipes);
+  const nextLogs = mergeByKey<DailyLog>(curLogs, data.dailyLogs, (l) => l.date);
+  const nextChecklists = mergeByKey<WeeklyChecklist>(curChecklists, data.weeklyChecklists, (c) => c.weekStart);
+  const nextInsights = mergeByKey<DailyInsight>(curInsights, data.dailyInsights, (i) => i.date);
+
+  await Promise.all([
+    saveSessions(nextSessions),
+    saveTemplates(nextTemplates),
+    saveDailyLogs(nextLogs),
+    saveWeeklyChecklists(nextChecklists),
+    saveDailyInsights(nextInsights),
+    saveFoodEntries(nextFood),
+    saveRecipes(nextRecipes),
+  ]);
+
+  if (data.settings && typeof data.settings === 'object') {
+    // Imported settings overlay existing; existing API keys survive (export strips them).
+    await saveSettings({ ...curSettings, ...data.settings });
+  }
+
+  return {
+    sessions: Array.isArray(data.sessions) ? data.sessions.length : 0,
+    dailyLogs: Array.isArray(data.dailyLogs) ? data.dailyLogs.length : 0,
+    templates: Array.isArray(data.templates) ? data.templates.length : 0,
+    foodEntries: Array.isArray(data.foodEntries) ? data.foodEntries.length : 0,
+    recipes: Array.isArray(data.recipes) ? data.recipes.length : 0,
+    weeklyChecklists: Array.isArray(data.weeklyChecklists) ? data.weeklyChecklists.length : 0,
+    dailyInsights: Array.isArray(data.dailyInsights) ? data.dailyInsights.length : 0,
+  };
 }
 
 /**

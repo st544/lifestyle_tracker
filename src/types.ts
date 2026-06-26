@@ -98,6 +98,8 @@ export interface Settings {
   usdaApiKey?: string;
   // Daily calorie intake goal (kcal). Optional — drives the nutrition progress bar.
   dailyCalorieGoal?: number;
+  // Auto-sync Garmin → Health Connect → app on app-open (Android only).
+  healthConnectEnabled?: boolean;
   // One-time migration flag: sleep quality scale changed 1-10 → 1-100.
   sleepQualityMigratedToHundred?: boolean;
   // One-time migration flag: per-session loadScore recomputed under the
@@ -141,6 +143,15 @@ export interface StravaSyncState {
   lastSyncedAt: number;
 }
 
+// --- Health Connect (Garmin → Health Connect → app, Android) ------------
+
+export interface HealthConnectSyncState {
+  /** Health Connect record metadata.id values already ingested. */
+  syncedRecordIds: string[];
+  /** Unix epoch MILLISECONDS of the most recently synced record's start time. */
+  lastSyncedAt: number;
+}
+
 // --- Daily wellness / supplement log -----------------------------------
 
 export type SupplementKey = 'creatine' | 'greens' | 'electrolytes' | 'protein';
@@ -157,6 +168,7 @@ export interface DailyLog {
   hrv?: number;            // ms — overnight HRV score
   sleepHours?: number;     // hours slept
   sleepQuality?: number;   // 1-100 (was 1-10 in v1 — migrated automatically on first run)
+  restingHr?: number;      // bpm — per-day resting heart rate (from Health Connect)
   supplements: Partial<Record<SupplementKey, boolean>>;
   notes?: string;
   wellnessScore?: number;  // cached composite 0-100
