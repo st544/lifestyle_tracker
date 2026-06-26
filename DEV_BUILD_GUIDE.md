@@ -118,7 +118,7 @@ If the phone and laptop aren't on the same network: `npx expo start --dev-client
 3. **USDA FoodData Central key** (nutrition search) — free key at https://fdc.nal.usda.gov/api-key-signup.html.
 4. **Body weight / Max HR / Resting HR** — re-enter in Settings; these drive the load + RPE models.
 
-> **Migrating existing data:** before switching, open the old Expo Go app → Goals/Settings → **Export all data as JSON** → share to yourself. (There's no in-app JSON *import* yet — if you want your history in the dev build, the kickoff prompt should add a JSON import counterpart to the existing CSV import, OR you re-import HRV/sleep via the CSV path. Flag this to the user.)
+> **Migrating existing data:** before switching, open the old Expo Go app → Settings → **Export all data as JSON** → share it to yourself. Then in the dev build, go to **Settings → Restore data → Restore from JSON**, pick (or paste) that file, and confirm. It's a non-destructive union (imported records win on id/date collisions). API keys are intentionally stripped from exports, so re-enter those separately (above).
 
 ---
 
@@ -151,5 +151,6 @@ First run does a full Gradle prebuild (slow, ~10 min). Subsequent runs are incre
 
 - **"Unable to load script / could not connect to Metro"** in the dev build → make sure `npx expo start --dev-client` is running and the phone is on the same Wi-Fi (or use `--tunnel`).
 - **Health Connect permission sheet never appears** → the `react-native-health-connect` config plugin didn't inject the manifest entries; confirm it's in `app.json` `plugins` and that you rebuilt after adding it. Permissions only take effect in a fresh build.
+- **App hard-crashes when tapping "Grant permissions"** → the permission delegate isn't wired into MainActivity (`lateinit property requestPermission has not been initialized`). Confirm `./plugins/with-health-connect-delegate.js` is in `app.json` `plugins` and rebuild — the library's own plugin does not add this.
 - **`installTurboModule` / startup crash after adding the native module** → version mismatch. Run `npx expo install --fix`, rebuild. (This project has hit this before with reanimated — see CONTEXT.md.)
 - **APK won't install ("app not installed")** → uninstall any older copy of the dev build first; signing keys must match.

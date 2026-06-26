@@ -23,7 +23,9 @@ export type RootStackParamList = {
   Settings: undefined;
   DailyLog: { date?: string } | undefined;
   StravaSetup: undefined;
+  HealthConnect: undefined;
   CsvImport: undefined;
+  JsonImport: undefined;
   Wellness: undefined;
   Readiness: undefined;
   Nutrition: { date?: string } | undefined;

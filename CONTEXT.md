@@ -14,7 +14,7 @@ Primary user journey:
 
 ## Stack
 
-- **Expo SDK 54** (Expo Go, no custom dev build)
+- **Expo SDK 54** — **development build required** (the `react-native-health-connect` native module is not in the Expo Go sandbox). Was Expo-Go-only until the Health Connect integration landed; see `DEV_BUILD_GUIDE.md`. Day-to-day JS still hot-reloads over `npx expo start --dev-client`.
 - **React Native 0.81.x**, React 19.1
 - **TypeScript** strict mode
 - **React Navigation v7** (bottom tabs + native stack)
@@ -47,7 +47,8 @@ Primary user journey:
     ├── dates.ts               # weekRange, toDateString, formatTime, etc.
     ├── load.ts                # calculateLoadScore, calculateWeeklyLoad, getLoadZone, isRecoveryType
     ├── streaks.ts             # calculateStreak (consecutive weeks hitting a per-type goal)
-    ├── wellness.ts            # calculateWellness, rollingHrvBaseline, wellnessBand — composite 0-100 from HRV/sleep/load
+    ├── wellness.ts            # calculateWellness, wellnessBand — composite 0-100 from HRV/sleep/load (load comes from ACWR)
+    ├── hrv.ts                 # rollingHrvBaseline (extracted here so wellness.ts ↔ load-form.ts don't form an import cycle)
     ├── readiness.ts           # calculateReadiness, readinessBand — forward-looking 0-100 weighted 50/35/15 toward HRV/sleep/load
     ├── rpe.ts                 # estimateRpe, inferRunSubtype — RPE from duration + avg/max HR vs user's max HR setting
     ├── csv.ts                 # parseCsv — column auto-detection + row coercion for HRV/sleep/supplement import
@@ -64,7 +65,9 @@ Primary user journey:
     │   ├── insights.ts        # generateDailyInsight — builds 14-day prompt, calls Claude w/ structured outputs, caches by target date
     │   ├── strava.ts          # Strava OAuth + activity list (fetch-based; manual-paste auth flow)
     │   ├── strava-sync.ts     # syncStravaActivities — pulls new activities, dedupes, maps to Session via RPE estimator
-    │   └── usda.ts            # USDA FoodData Central search (fetch-based) — searchFoods + scaleMacros (per-100g)
+    │   ├── usda.ts            # USDA FoodData Central search (fetch-based) — searchFoods + scaleMacros (per-100g)
+    │   ├── health-connect.ts  # Guarded wrapper over react-native-health-connect (Android-only, no-op elsewhere): isAvailable/init/permissions/typed reads
+    │   └── health-connect-sync.ts # syncHealthConnect — read since HWM, dedup on record id, map exercise→Session, upsert HRV/sleep/restingHr (mirrors strava-sync)
     ├── components/
     │   ├── Section.tsx        # Section header + Card container
     │   ├── Pill.tsx           # Animated chip with press scale + haptic
@@ -79,7 +82,7 @@ Primary user journey:
     │   ├── SaveCheckmark.tsx  # SVG-stroke-drawn check inside a pulsing ring
     │   ├── TypewriterText.tsx # Char-by-char text reveal (JS setInterval, fine for short strings)
     │   ├── FadeInView.tsx     # Reanimated fade + slide-up with optional spring
-    │   ├── AnimatedTabIcon.tsx# Bounces on tab focus
+    │   ├── AnimatedTabIcon.tsx# Outline→FILLED glyph swap on focus + tinted pill w/ hairline border + spring bounce
     │   ├── WellnessRing.tsx   # Circular SVG gauge for wellness score with animated draw + count-up
     │   ├── SupplementsRow.tsx # 4 toggle buttons: creatine / greens / electrolytes / protein
     │   ├── DailyLogRow.tsx    # Inline daily-log row on Today (HRV / sleep / supplements / wellness ring)
@@ -93,18 +96,21 @@ Primary user journey:
     │   ├── DurationDropdown.tsx # Hours+minutes dropdown (Modal + ScrollView) for hiking duration entry
     │   ├── FoodSearchModal.tsx  # USDA food search → pick → set grams → confirm; used by Nutrition + RecipeBuilder
     │   ├── WeekDaysRing.tsx     # Tiny SVG progress ring (days trained this week) used in the Today hero
-    │   └── HolyMoonlightSword.tsx # Animated glowing SVG sword emblem (Bloodborne HMS, activated) under the Today date — gold hilt left, pulsing blue moonlight blade right
+    │   ├── HolyMoonlightSword.tsx # Animated SVG emblem under the Today date — HMS *transformed greatsword* form: two-handed iron hilt + heavy cruciform guard + moon-gem (left), short steel ricasso, then a BROAD translucent cyan moonlight blade (dark steel spine, bright animated core, hot layered leading edge, tip flare), breathing aura + counter-phase shimmer + frost motes. 320×70 viewBox, scales to row width.
+    │   └── PlannedSessionModal.tsx # Styled bottom-sheet for a Planned session (replaces the native Alert): session load + weekly-load jump + LoadBar + animated Mark completed (SaveCheckmark + TriforceBurst)
     └── screens/
         ├── TodayScreen.tsx        # hero: date + glowing HolyMoonlightSword (left), streak flame chip + days-ring + Goals/Backfill/⚙ (right); TrainingReadinessCard, DailyLogRow, DailyInsightCard, Quick add, sessions, This week, Nutrition panel (last); pull-to-refresh burst
         ├── CalendarScreen.tsx     # month view w/ custom day cells (original-size activity dots); each day's WELLNESS score renders as a small square (un-rounded) NEON-outlined tint around the date number (not a dot); today marker gated to the active month (no square dupe on adjacent months); streak chips with a continuous gradient sheen; milestone overlay (4/12/26/52 weeks)
-        ├── DayDetailScreen.tsx    # tap a day → quick-add + per-session actions (mark complete / skip / move / delete)
+        ├── DayDetailScreen.tsx    # tap a day → quick-add; tapping a PLANNED session opens PlannedSessionModal (styled sheet: load + weekly-load jump + animated Mark completed)
         ├── AddTabScreen.tsx       # tiles per type, "Plan a session", templates list
         ├── AddSessionScreen.tsx   # one-screen form with live load preview, save morphs into checkmark + triforce burst
         ├── WeekScreen.tsx         # totals, animated LoadBar, meal-prep checkbox, workout/recovery/miles, counts by type — week navigator; tapping the **Target** stat opens a modal to edit the global weekly load target (applies to every week)
         ├── TrendsScreen.tsx       # 4/8/12/26-week bar charts: load, sessions, minutes, miles, per-activity
         ├── BackfillScreen.tsx     # last 7 days with one-tap quick-add per type
         ├── GoalsScreen.tsx        # GOALS ONLY now: per-activity weekly minimums, weekly load target, daily calorie goal (+ link to Settings)
-        ├── SettingsScreen.tsx     # device/integration settings split out of Goals: week-starts-on, max/resting HR, body weight, Strava, CSV import, export, USDA key, Anthropic key
+        ├── SettingsScreen.tsx     # device/integration settings: week-starts-on, max/resting HR, body weight, Strava, Health Connect (Android-only row), CSV import, export, restore-from-JSON, USDA key, Anthropic key
+        ├── HealthConnectSetupScreen.tsx # Android: HC availability/grant-permissions/sync-now/last-synced/open-settings/auto-sync toggle (mirrors StravaSetup)
+        ├── JsonImportScreen.tsx   # restore a full JSON export into this install (for the Expo Go → dev-build migration)
         ├── DailyLogScreen.tsx     # Full modal for HRV / sleep / supplements / notes — supports past dates via the date picker
         ├── StravaSetupScreen.tsx  # One-time Strava OAuth setup (manual-paste flow), shows connection status, sync-now / disconnect
         ├── CsvImportScreen.tsx    # Pick a CSV file OR paste text → auto-detect columns → preview → bulk upsert daily logs
@@ -135,6 +141,7 @@ Primary user journey:
 | `training_daily_insights` | `DailyInsight[]` — Claude's recommendations, capped at last 60 entries, keyed by target date (tomorrow) |
 | `training_strava_tokens` | `StravaTokens` — `{accessToken, refreshToken, expiresAt, athleteId, athleteName}` |
 | `training_strava_sync_state` | `{syncedIds: number[], lastSyncedAt: number}` — dedup set capped at 5000, high-water-mark unix seconds for incremental sync |
+| `training_health_connect_sync_state` | `{syncedRecordIds: string[], lastSyncedAt: number}` — HC record-id dedup set (cap 5000), high-water-mark unix **milliseconds** |
 | `training_last_seen_streaks` | `Record<SessionType, number>` — used for milestone detection on Calendar focus |
 | `training_last_seen_weekly_pct` | `number` — used for pull-to-refresh celebration on Today |
 | `training_food_entries` | `FoodEntry[]` — logged foods (one per item eaten), keyed by date |
@@ -155,7 +162,7 @@ loadScore = baseEnergyEquivalent × stressMultiplier
 Per-activity rules (`baseEnergyEquivalent` → multiplier). **Hiking / Run / Lift use the v2 scheme below; BJJ / Rock Climb / recovery are unchanged.**
 - **BJJ** *(unchanged)*: calories if known, else `duration × RPE × 0.85`. Mult by subtype: Technique only 1.00 · Normal class 1.10 · Hard sparring 1.20 · Open mat 1.20 · Competition class 1.30.
 - **Run**: `activeCalories × runImpactMultiplier`. No calories → estimate `round(bodyWeightKg × MET × hours)` (METs 8.0–11.0 by subtype). Mult (capped **1.40**): Easy/Zone 2 0.90 · Long easy run 1.00 · Tempo 1.10 · Intervals 1.20 · Race/time trial 1.30 · Trail run 1.10 · Hilly run 1.15 · Downhill-heavy run 1.20.
-- **Lift**: `round(bodyWeightKg × MET × hours) × finalMultiplier` (uses calories instead of the MET estimate if provided). `finalMultiplier = baseMult + rpeAdjustment`, capped **1.45**. [MET, baseMult]: Maintenance/easy [3.5, 1.05] · Normal lift [4.5, 1.15] · Heavy upper [5.0, 1.20] · Heavy lower [5.5, 1.30] · Heavy full body [5.5, 1.25] · Kettlebell [5.5, 1.15] · Circuit [5.8, 1.10]. RPE adj: 1–4 −0.10 · 5–6 0 · 7–8 +0.05 · 9–10 +0.10 (RPE 0/unset → 0).
+- **Lift**: `round(bodyWeightKg × MET × hours) × finalMultiplier` (uses calories instead of the MET estimate if provided). `finalMultiplier = baseMult + rpeAdjustment`, capped **1.45**. [MET, baseMult]: Maintenance/easy [3.5, 1.05] · Normal lift [4.5, 1.15] · Heavy upper [5.0, 1.20] · Heavy lower [5.5, 1.30] · Heavy full body [5.5, 1.25] · Kettlebell [5.5, 1.15] · Circuit [5.8, 1.10]. RPE adj (per-RPE, monotonic): 1 −0.12 · 2 −0.10 · 3 −0.08 · 4 −0.05 · 5 −0.02 · 6 0 · 7 +0.05 · 8 +0.08 · 9 +0.12 · 10 +0.16 (RPE 0/unset → 0). Final lifting multiplier still capped at 1.45.
 - **Hiking**: `activeCalories × hikeImpactMultiplier`. No calories → estimate `round(bodyWeightKg × difficulty-MET × hours)` (METs 4.5–9.0). `hikeImpactMultiplier = 1 + difficultyBonus + elevationBonus + durationBonus + packBonus`, capped **1.75**:
   - difficulty: Easy/flat 0 · Moderate 0.10 · Hilly 0.20 · Hard/steep 0.30 · Very hard/mountain 0.40
   - elevation (`elevationGainFeet / miles`): <100 ft/mi 0 · 100–250 0.05 · 250–500 0.10 · 500–750 0.15 · >750 0.20
@@ -212,7 +219,7 @@ Shown on WeekScreen below the LoadBar / totals card. Past weeks show the ratio a
 
 ## TrainingReadinessCard is the Today hero (merged)
 
-`TrainingReadinessCard` on the Today screen now optionally includes a "Today's read" sub-section (smart message + big projected % + LoadBar). When TodayScreen passes `smartMessage`, `completedPercent`, and `projectedPercent`, the card renders the merged view; otherwise it's just the readiness portion. This replaces what used to be two stacked cards (readiness + gradient smart-message card) — one combined hero card instead.
+`TrainingReadinessCard` on the Today screen now optionally includes a "Today's read" sub-section (smart message + big **completed** % + LoadBar). The big number, its zone color, and the smart message (`generateSmartMessage`) are all driven by **`percentCompleted`** (what's actually been done this week), NOT the projected total. The LoadBar still shows both completed and projected fills for context. When TodayScreen passes `smartMessage`, `completedPercent`, and `projectedPercent`, the card renders the merged view; otherwise it's just the readiness portion.
 
 A **sticky banner** (`READINESS XX · BAND`) appears at the top of Today when the user scrolls past the readiness card, using Reanimated's `useAnimatedScrollHandler`. The card's bottom Y is captured via `onLayout` into a shared value; the banner's `opacity` + `translateY` interpolate when `scrollY > cardBottomY`.
 
@@ -248,11 +255,13 @@ wellness = 0.40 * hrvScore + 0.40 * sleepScore + 0.20 * loadBalance
 with missing components renormalized so partial logs don't tank the score.
 
 - **HRV score** — relative to the user's rolling 14-day mean. 100 = at or above baseline; 0 = 50% below. Falls back to a coarse raw mapping until enough days are logged.
-- **Sleep score** — 60% hours (optimal 7-9h band) + 40% quality (1-10 → 0-100).
-- **Load balance** — sweet spot 60-90% of weekly target. Both undertraining and overreaching reduce score.
+- **Sleep score** — 60% hours + 40% quality (0-100). Hours score is **100 only in the 8–9h ideal window**; 7→8h ramps 85→100; **under 7h is penalized** (7→85, 6→63, 5→41…); over 9h mildly penalized.
+- **Load balance** — derived from the **ACWR** (acute:chronic ratio from `load-form.ts`), not % of target. Optimal 0.8–1.3 → 100; fresh (<0.8) → 75–100; high/overreach/spike penalized progressively. **Returns null when there's no chronic baseline yet** (component drops out → wellness uses HRV + sleep only). Uses the recovery-adjusted ratio when present. (`rollingHrvBaseline` lives in its own `src/hrv.ts` module so `wellness.ts` and `load-form.ts` can both use it without an import cycle.)
 
-Color bands come from `wellnessBand()` — used by the Wellness Ring and the DailyLogScreen breakdown:
-- **85+** Primed (green) · **70-84** Ready (blue) · **55-69** Steady (gold) · **40-54** Drained (amber) · **<40** Recover (red)
+**No recovery data → no score.** `calculateWellness` returns `score: null` when there's **no HRV AND no sleep** logged (even if load/supplements exist). It deliberately does NOT fall back to a load-only score — on planned future days that read as a misleadingly high ~98. `WellnessRing` renders a muted "—" for null; the Calendar skips the tint; Trends/insights exclude the day. `WellnessBreakdown.score` is therefore `number | null` — guard it in any new consumer.
+
+Color bands come from `wellnessBand()` — **neon palette** — used by the Wellness Ring, Calendar date tint, and the DailyLogScreen breakdown:
+- **85+** Primed `#39FF6A` · **70-84** Ready `#2FE6FF` · **55-69** Steady `#FFE93D` · **40-54** Drained `#FF9A2E` · **<40** Recover `#FF2D6B`
 
 ## Strava sync pipeline
 
@@ -278,6 +287,22 @@ Lives in `src/api/strava.ts` (HTTP client) and `src/api/strava-sync.ts` (the run
 **RPE algorithm** (`src/rpe.ts`): five-band map of `%HRmax → base RPE` (2/3/5/7/8/9/10), plus a duration modifier (`±0.5–1`) and a peak-effort bias (`+0.5` when max-HR-in-activity ≥ 95% of user max), clamped to [1, 10]. Returns `undefined` if HR isn't usable so the sync layer can fall back to type-based defaults.
 
 **Unmapped activity types** (Ride, Swim, Walk, etc.) are silently skipped.
+
+## Health Connect sync (Android — Garmin → Health Connect → app)
+
+Mirrors the Strava pipeline. `src/api/health-connect.ts` is the guarded native wrapper; `src/api/health-connect-sync.ts` is the runner; `HealthConnectSetupScreen` is the UI. Uses `react-native-health-connect` (v3, Expo config plugin in `app.json`, Android read-permissions declared in `app.json` → `android.permissions`).
+
+> **Build requirement: `minSdkVersion 26`.** `androidx.health.connect` needs API 26+, but Expo's default is 24 → the manifest merger fails (`minSdkVersion 24 cannot be smaller than 26`). Fixed by the **`expo-build-properties`** config plugin in `app.json` (`android.minSdkVersion: 26`). `expo-build-properties` is a build-time-only plugin, not a runtime dep.
+
+> **Discovery trap: Android 14+ permission-usage declaration.** On Android 14+ (Health Connect is part of the OS — e.g. Samsung phones), HC recognizes a client app ONLY if it declares a `VIEW_PERMISSION_USAGE` / `HEALTH_PERMISSIONS` **activity-alias**. The library's bundled plugin only adds the Android-13 `ACTION_SHOW_PERMISSIONS_RATIONALE` intent-filter, so on Android 14 the app **never appears in Health Connect → App permissions** (can't be searched/added) and `requestPermission()` returns empty. Fixed by our local config plugin **`plugins/with-health-connect-rationale.js`** (in `app.json`) which injects the activity-alias targeting MainActivity. Keep BOTH the library's intent-filter (A13) and this alias (A14+). Verified via `npx expo prebuild`.
+
+> **Crash trap: the permission delegate.** The library's bundled Expo plugin only adds the rationale intent-filter — it does **NOT** call `HealthConnectPermissionDelegate.setPermissionDelegate(this)` in `MainActivity.onCreate`, which the native `requestPermission()` requires (it registers the ActivityResultLauncher). Without it, tapping "Grant permissions" hits an uninitialized `lateinit` launcher inside a coroutine → **uncatchable hard crash**. Fixed by our local config plugin **`plugins/with-health-connect-delegate.js`** (registered in `app.json`), which injects the import + delegate call into the generated `MainActivity.kt` at prebuild. Verified via `npx expo prebuild` inspection. Do not remove it from `app.json` plugins.
+
+- **Guarded everywhere:** every wrapper fn no-ops + returns empty on iOS, when the SDK is unavailable, or when the module can't be required (lazy `require` in a try/catch). The app still runs on iOS / non-HC Android with zero crashes and no error-toast spam.
+- **Sync trigger:** `TodayScreen.load()` calls `syncHealthConnect()` after the Strava block, gated by `Platform.OS === 'android' && Settings.healthConnectEnabled`. App-open only (no background service in v1). On import it toasts the count and re-fetches sessions/logs so new records render immediately. Errors are `console.warn`-swallowed.
+- **`syncHealthConnect()`** (returns `{importedSessions, importedDailyLogs, skipped}`): `isAvailable → ensureInitialized → getGrantedRecordTypes` (bails if none — never pops a permission sheet during app-open sync) → read records since `lastSyncedAt` (30-day backfill on first run) → dedup on `metadata.id` → write through the EXISTING helpers.
+- **Record → app mapping:** `ExerciseSession` → `Session` via `mapHealthConnectType()` (numeric HC exercise codes + name-based BJJ override) reusing `estimateRpe()` + `calculateLoadScore()` exactly like strava-sync; `activeCalories`/`distance`/HR pulled from overlapping `ActiveCaloriesBurned`/`Distance`/`HeartRate` records in the session window. `HeartRateVariabilityRmssd` → `DailyLog.hrv`, `SleepSession` duration → `DailyLog.sleepHours` (attributed to wake/end date), `RestingHeartRate` → `DailyLog.restingHr` (new field). HRV/sleep import wins for those fields; `upsertDailyLog` already merges so notes/supplements are never clobbered. **Sleep quality** is *derived from HC sleep STAGES** (`deriveSleepQuality`: 0.6·restorative[deep+REM vs 45%] + 0.4·efficiency) since HC has no Garmin sleep-score field; only set when stage data exists, else duration-only. **HRV often isn't written to HC by Garmin** (device/firmware dependent) — if HC's HRV category is empty, no read can recover it; fall back to manual entry or the CSV importer.
+- **JSON restore:** `importAllFromJson()` in storage + `JsonImportScreen` restore a prior `exportAllAsJson()` dump (non-destructive union by id/date). Built because the dev build has a **fresh AsyncStorage sandbox** — the user re-imports history + re-enters API keys after migrating off Expo Go.
 
 ## Daily AI insight pipeline (Anthropic)
 

@@ -32,7 +32,7 @@
 ### Trends
 - 4 / 8 / 12 / 26 week range selector
 - Bar charts for: weekly load (with target line), sessions, workout minutes, recovery minutes, miles run
-- Per-activity charts (BJJ / Lift / Run / Climb) with per-activity goal as target line
+- Per-activity charts (BJJ / Lift — Run & Climb charts removed by request) with per-activity goal as target line
 
 ### Animation + feel (Zelda inspired)
 - Tier 1: press scale + haptic on every tappable, count-up numbers everywhere, tab icon bounce on focus, screen entry fade-stagger
@@ -67,6 +67,13 @@
 - Food entries + recipes included in JSON export (USDA key stripped)
 - Scope: no barcode scan / micros / meal grouping yet — see ideas below
 
+### Health Connect (Garmin → Health Connect → app, Android)
+- **Native module integration** (`react-native-health-connect` v3 + Expo config plugin) — **ends Expo Go**, requires a development build (`DEV_BUILD_GUIDE.md`).
+- `src/api/health-connect.ts` guarded wrapper (no-op on iOS / when unavailable / denied) + `health-connect-sync.ts` runner mirroring the Strava pipeline (read since HWM, dedup on record id, 30-day backfill).
+- Imports: HRV → `DailyLog.hrv`, sleep duration → `DailyLog.sleepHours`, resting HR → new `DailyLog.restingHr`, exercise sessions → `Session` (reusing `estimateRpe` + `calculateLoadScore`, with active calories / distance / HR from overlapping records).
+- `HealthConnectSetupScreen` (availability, grant permissions, sync now, last-synced, open HC settings, auto-sync toggle → `Settings.healthConnectEnabled`); Android-only row in Settings. App-open sync gated in `TodayScreen.load()`.
+- **JSON restore** (`importAllFromJson` + `JsonImportScreen`) so history can move from the old Expo Go install into the fresh dev-build sandbox.
+
 ### Layout/UX fixes
 - Tab bar respects safe-area bottom inset (Android edge-to-edge nav)
 - GestureHandlerRootView at app root
@@ -74,7 +81,7 @@
 
 ## Planned next (priority order)
 
-1. **HRV / sleep auto-import from a watch — SPEC'D, ready to build.** Garmin → Health Connect → app (Android). Full plan in `HEALTH_CONNECT.md`; dev-build/deploy steps in `DEV_BUILD_GUIDE.md`; one-shot build prompt in `HEALTH_CONNECT_KICKOFF_PROMPT.md`. Requires leaving Expo Go for a development build (native module). Google Fit is NOT the path — it's being shut down; Health Connect is the replacement. iOS/HealthKit is a separate parallel task later.
+1. ~~**HRV / sleep auto-import from a watch.**~~ **SHIPPED** (Android, Health Connect — see Shipped above). Remaining: verify record shapes/units against a real Garmin device on-device; derive `sleepQuality` from stage composition if a score isn't present; iOS/HealthKit is still a separate parallel task (parallel `health-kit.ts` + `health-kit-sync.ts` writing the same `upsertDailyLog`/`addSession` targets).
 2. **Insight history view.** Cached insights are kept (last 60) but not browsable. Add a "Past insights" screen so the user can see which recommendations they followed and how the week unfolded.
 3. **Streak/quality of compliance.** Track whether the user actually followed each day's insight (manual check). Feed back into the next day's prompt as additional context.
 4. **Sounds.** `src/sounds.ts` is a stub. Drop short Zelda-style chimes into `assets/sounds/` and wire them up via `expo-audio`:

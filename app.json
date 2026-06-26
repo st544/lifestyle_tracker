@@ -1,11 +1,12 @@
 {
   "expo": {
-    "name": "Training Calendar",
+    "name": "Lifestyle Tracker",
     "slug": "training-calendar",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
     "splash": {
       "backgroundColor": "#0B0F14",
       "resizeMode": "contain"
@@ -17,14 +18,41 @@
     "android": {
       "package": "com.example.trainingcalendar",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0B0F14"
-      }
+      },
+      "permissions": [
+        "android.permission.health.READ_HEART_RATE_VARIABILITY",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_EXERCISE",
+        "android.permission.health.READ_ACTIVE_CALORIES_BURNED",
+        "android.permission.health.READ_RESTING_HEART_RATE",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_DISTANCE"
+      ]
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
-      "@react-native-community/datetimepicker"
-    ]
+      "@react-native-community/datetimepicker",
+      "react-native-health-connect",
+      "./plugins/with-health-connect-delegate.js",
+      "./plugins/with-health-connect-rationale.js",
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "0d447b9b-a6bf-416e-ba0d-66282aa54666"
+      }
+    }
   }
 }

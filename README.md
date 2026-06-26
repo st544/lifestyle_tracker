@@ -163,7 +163,7 @@ Multipliers (per subtype/difficulty):
 |---|---|
 | BJJ | Technique only 1.00 · Normal class 1.10 · Hard sparring 1.20 · Open mat 1.20 · Competition class 1.30 |
 | **Run** (cap 1.40) | Easy/Zone 2 0.90 · Long easy run 1.00 · Tempo 1.10 · Intervals 1.20 · Race/time trial 1.30 · Trail run 1.10 · Hilly run 1.15 · Downhill-heavy run 1.20 |
-| **Lift** (cap 1.45) | base by type (Maintenance/easy 1.05 · Normal 1.15 · Heavy upper 1.20 · Heavy lower 1.30 · Heavy full body 1.25 · Circuit 1.10 · Kettlebell 1.15) **+ RPE adj** (1–4 −0.10 · 5–6 0 · 7–8 +0.05 · 9–10 +0.10) |
+| **Lift** (cap 1.45) | base by type (Maintenance/easy 1.05 · Normal 1.15 · Heavy upper 1.20 · Heavy lower 1.30 · Heavy full body 1.25 · Circuit 1.10 · Kettlebell 1.15) **+ per-RPE adj** (1 −0.12 … 6 0 · 7 +0.05 · 8 +0.08 · 9 +0.12 · 10 +0.16) |
 | Rock Climb | Casual 1.00 · Top rope/moderate 1.05 · Bouldering 1.20 · Hard bouldering 1.30 · Limit 1.35 |
 | **Hiking** (cap 1.75) | `1 + difficultyBonus + elevationBonus + durationBonus + packBonus` — difficulty (flat 0 → mountain 0.40), elevation/mile (<100 ft/mi 0 → >750 0.20), duration (<2h 0 → 6h+ 0.15), pack (0–10 lb 0 → 25+ 0.10) |
 | Recovery | Sauna/Sauna+Cold 0.50 · Cold Plunge 0.30 · Mobility 1.00 · Rest 0 |
